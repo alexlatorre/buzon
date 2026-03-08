@@ -2,6 +2,8 @@
 
 Buzón Seguro es una plataforma de entrega de archivos y mensajes con arquitectura **Zero-Knowledge** (Conocimiento Cero). Está diseñado para permitir que cualquier persona te envíe información de manera ultra-segura sin que el servidor sea capaz de leer el contenido.
 
+https://gallifrey.sytes.net/
+
 ---
 
 ## 🚀 Guía de Usuario
