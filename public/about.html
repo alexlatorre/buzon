@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow Drop | ¿Cómo Funciona?</title>
+  <meta name="description" content="Aprende cómo Shadow Drop protege tu información con arquitectura Zero-Knowledge y cifrado de extremo a extremo.">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* About Page Specific Styles */
+    .about-page {
+      min-height: 100vh;
+      background: var(--bg-color);
+      overflow-y: auto;
+    }
+
+    .about-nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 2rem;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .about-nav-brand {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-color);
+      text-decoration: none;
+      letter-spacing: -0.03em;
+    }
+
+    .about-nav-back {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--accent-color);
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+
+    .about-nav-back:hover {
+      opacity: 0.7;
+    }
+
+    /* Hero */
+    .about-hero {
+      text-align: center;
+      padding: 5rem 2rem 4rem;
+      background: linear-gradient(180deg, #f0f7ff 0%, var(--bg-color) 100%);
+    }
+
+    .about-hero h1 {
+      font-size: 3rem;
+      font-weight: 700;
+      letter-spacing: -0.05em;
+      line-height: 1.1;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #1d1d1f 0%, #0071e3 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .about-hero .subtitle {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 560px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    .about-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(0, 113, 227, 0.08);
+      color: var(--accent-color);
+      padding: 0.5rem 1.25rem;
+      border-radius: 980px;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      margin-bottom: 2rem;
+      letter-spacing: 0.02em;
+    }
+
+    /* Sections */
+    .about-section {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 4rem 2rem;
+    }
+
+    .about-section-title {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .about-section-title h2 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      margin-bottom: 0.75rem;
+    }
+
+    .about-section-title p {
+      font-size: 1.0625rem;
+      color: var(--text-muted);
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    /* Step Cards */
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    .step-card {
+      background: var(--panel-bg);
+      border-radius: 20px;
+      padding: 2.5rem 2rem;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .step-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--accent-color), #40c4ff);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .step-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+    }
+
+    .step-card:hover::before {
+      opacity: 1;
+    }
+
+    .step-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .step-icon.blue { background: linear-gradient(135deg, #e3f0ff, #c5dfff); }
+    .step-icon.green { background: linear-gradient(135deg, #dcfce7, #bbf7d0); }
+    .step-icon.purple { background: linear-gradient(135deg, #f3e8ff, #e9d5ff); }
+
+    .step-card h3 {
+      font-size: 1.125rem;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.02em;
+    }
+
+    .step-card p {
+      font-size: 0.9375rem;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+
+    .step-number {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      color: var(--accent-color);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.75rem;
+    }
+
+    /* Crypto Section */
+    .crypto-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+    }
+
+    .crypto-card {
+      background: var(--panel-bg);
+      border-radius: 20px;
+      padding: 2rem;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+      border: 1px solid transparent;
+      transition: border-color 0.3s, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .crypto-card:hover {
+      border-color: var(--accent-color);
+      transform: translateY(-2px);
+    }
+
+    .crypto-card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .crypto-card-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #e3f0ff, #c5dfff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.125rem;
+      flex-shrink: 0;
+    }
+
+    .crypto-card-header h3 {
+      font-size: 1rem;
+      margin: 0;
+    }
+
+    .crypto-card p {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .crypto-card code {
+      background: var(--input-bg);
+      padding: 0.15rem 0.5rem;
+      border-radius: 6px;
+      font-size: 0.8125rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--accent-color);
+    }
+
+    /* Flow Diagram */
+    .flow-section {
+      background: linear-gradient(180deg, var(--bg-color) 0%, #f0f7ff 50%, var(--bg-color) 100%);
+    }
+
+    .flow-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      flex-wrap: wrap;
+      padding: 1rem 0;
+    }
+
+    .flow-node {
+      background: var(--panel-bg);
+      border-radius: 20px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+      min-width: 180px;
+      max-width: 220px;
+      flex: 1;
+    }
+
+    .flow-node-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      margin: 0 auto 1rem;
+    }
+
+    .flow-node-icon.sender { background: linear-gradient(135deg, #dcfce7, #bbf7d0); }
+    .flow-node-icon.server { background: linear-gradient(135deg, #fef3c7, #fde68a); }
+    .flow-node-icon.receiver { background: linear-gradient(135deg, #e3f0ff, #c5dfff); }
+
+    .flow-node h4 {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--text-color);
+      text-transform: none;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+
+    .flow-node p {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .flow-arrow {
+      font-size: 1.5rem;
+      color: var(--border-color);
+      padding: 0 1rem;
+      flex-shrink: 0;
+    }
+
+    .flow-arrow-label {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      display: block;
+      text-align: center;
+      margin-top: 0.25rem;
+      font-weight: 500;
+    }
+
+    /* What Server Sees */
+    .server-panel {
+      background: #1d1d1f;
+      border-radius: 20px;
+      padding: 3rem;
+      color: #f5f5f7;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .server-panel::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(0, 113, 227, 0.06) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .server-panel h3 {
+      font-size: 1.375rem;
+      color: #f5f5f7;
+      margin-bottom: 1.5rem;
+      position: relative;
+    }
+
+    .server-panel .data-preview {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin: 2rem 0;
+      position: relative;
+    }
+
+    .data-item {
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: left;
+    }
+
+    .data-item .data-label {
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(255, 255, 255, 0.4);
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+
+    .data-item .data-value {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.6);
+      word-break: break-all;
+      line-height: 1.5;
+    }
+
+    .server-panel .conclusion {
+      font-size: 1rem;
+      color: rgba(255, 255, 255, 0.7);
+      max-width: 480px;
+      margin: 0 auto;
+      line-height: 1.6;
+      position: relative;
+    }
+
+    .conclusion strong {
+      color: #40c4ff;
+    }
+
+    /* Features list */
+    .features-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .features-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.25rem 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .features-list li:last-child {
+      border-bottom: none;
+    }
+
+    .feature-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #e3f0ff, #c5dfff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+      margin-top: 0.125rem;
+    }
+
+    .feature-text h4 {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--text-color);
+      text-transform: none;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.25rem;
+    }
+
+    .feature-text p {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Footer CTA */
+    .about-footer {
+      text-align: center;
+      padding: 4rem 2rem 5rem;
+    }
+
+    .about-footer h2 {
+      font-size: 2rem;
+      letter-spacing: -0.04em;
+      margin-bottom: 1rem;
+    }
+
+    .about-footer p {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      font-size: 1.0625rem;
+    }
+
+    .about-footer .btn {
+      padding: 0.875rem 2rem;
+      font-size: 1rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .about-hero h1 {
+        font-size: 2rem;
+      }
+
+      .about-hero .subtitle {
+        font-size: 1.0625rem;
+      }
+
+      .steps-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .crypto-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-container {
+        flex-direction: column;
+      }
+
+      .flow-arrow {
+        transform: rotate(90deg);
+        padding: 0.5rem 0;
+      }
+
+      .flow-node {
+        min-width: unset;
+        max-width: 100%;
+        width: 100%;
+      }
+
+      .about-section {
+        padding: 3rem 1.25rem;
+      }
+
+      .server-panel {
+        padding: 2rem 1.25rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="about-page">
+
+    <!-- Navigation -->
+    <nav class="about-nav">
+      <a href="/" class="about-nav-brand">Shadow Drop</a>
+      <a href="/" class="about-nav-back">← Volver al Login</a>
+    </nav>
+
+    <!-- Hero -->
+    <section class="about-hero">
+      <div class="about-badge">🔐 Zero-Knowledge Architecture</div>
+      <h1>¿Cómo funciona<br>Shadow Drop?</h1>
+      <p class="subtitle">Aprende cómo protegemos tu información con cifrado de extremo a extremo. El servidor nunca puede ver tus datos.</p>
+    </section>
+
+    <!-- User Flow -->
+    <section class="about-section">
+      <div class="about-section-title">
+        <h2>Tu información, paso a paso</h2>
+        <p>Desde el registro hasta la descarga, todo está diseñado para que solo tú puedas leer tus archivos.</p>
+      </div>
+
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-number">Paso 1</div>
+          <div class="step-icon blue">🔑</div>
+          <h3>Registro e Inicio de Sesión</h3>
+          <p>Crea una cuenta con un nombre de usuario y una <strong>Contraseña Maestra</strong>. Esta contraseña genera tus claves criptográficas directamente en tu navegador. El servidor <strong>nunca</strong> recibe tu contraseña ni tu clave privada en claro.</p>
+        </div>
+
+        <div class="step-card">
+          <div class="step-number">Paso 2</div>
+          <div class="step-icon green">📤</div>
+          <h3>Alguien te Envía Archivos</h3>
+          <p>El remitente utiliza tu <strong>enlace público</strong> o un <strong>enlace de un solo uso</strong>. Su navegador cifra los archivos con tu clave pública antes de enviarlos. El servidor solo recibe datos cifrados.</p>
+        </div>
+
+        <div class="step-card">
+          <div class="step-number">Paso 3</div>
+          <div class="step-icon purple">📥</div>
+          <h3>Recibes y Descifras</h3>
+          <p>Los paquetes cifrados aparecen en tu bandeja de entrada. Al abrirlos, tu navegador los descifra en RAM usando tu clave privada. Puedes descargar archivos con su nombre y extensión original.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Flow Diagram -->
+    <section class="about-section flow-section">
+      <div class="about-section-title">
+        <h2>Flujo de datos en tiempo real</h2>
+        <p>El servidor actúa únicamente como almacenamiento ciego de bits cifrados.</p>
+      </div>
+
+      <div class="flow-container">
+        <div class="flow-node">
+          <div class="flow-node-icon sender">👤</div>
+          <h4>Remitente</h4>
+          <p>Cifra archivos y mensaje con clave AES aleatoria. Cifra clave AES con tu clave pública RSA.</p>
+        </div>
+
+        <div class="flow-arrow">
+          →
+          <span class="flow-arrow-label">Datos cifrados</span>
+        </div>
+
+        <div class="flow-node">
+          <div class="flow-node-icon server">🗄️</div>
+          <h4>Servidor (Ciego)</h4>
+          <p>Almacena blobs binarios cifrados. No posee claves para descifrarlos. Zero-Knowledge.</p>
+        </div>
+
+        <div class="flow-arrow">
+          →
+          <span class="flow-arrow-label">Blobs cifrados</span>
+        </div>
+
+        <div class="flow-node">
+          <div class="flow-node-icon receiver">🔓</div>
+          <h4>Receptor (Tú)</h4>
+          <p>Tu clave privada (en RAM) descifra la clave AES. La clave AES descifra los archivos.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Security Deep Dive -->
+    <section class="about-section">
+      <div class="about-section-title">
+        <h2>Criptografía bajo el capó</h2>
+        <p>Todo el procesamiento criptográfico ocurre exclusivamente en tu navegador usando <code>window.crypto</code> (Web Crypto API).</p>
+      </div>
+
+      <div class="crypto-grid">
+        <div class="crypto-card">
+          <div class="crypto-card-header">
+            <div class="crypto-card-icon">🔐</div>
+            <h3>PBKDF2 — Derivación de Clave</h3>
+          </div>
+          <p>Tu contraseña maestra se transforma en una clave AES-256 mediante <code>PBKDF2</code> con <strong>600.000 iteraciones</strong> y <code>SHA-256</code>. Un salt aleatorio de 16 bytes hace imposible los ataques con tablas precomputadas (rainbow tables).</p>
+        </div>
+
+        <div class="crypto-card">
+          <div class="crypto-card-header">
+            <div class="crypto-card-icon">🗝️</div>
+            <h3>RSA-OAEP — Claves Asimétricas</h3>
+          </div>
+          <p>Se genera un par de claves <code>RSA-OAEP</code> de <strong>4096 bits</strong> en tu navegador. La clave privada se cifra con tu clave maestra derivada <strong>antes</strong> de salir de tu ordenador. El servidor solo almacena la clave pública y la privada cifrada.</p>
+        </div>
+
+        <div class="crypto-card">
+          <div class="crypto-card-header">
+            <div class="crypto-card-icon">⚡</div>
+            <h3>AES-GCM — Cifrado Simétrico</h3>
+          </div>
+          <p>Cada envío genera una clave de sesión <code>AES-GCM</code> de <strong>256 bits</strong> totalmente aleatoria. Los archivos y el mensaje se cifran con esta clave. La clave de sesión se cifra con la clave pública RSA del receptor.</p>
+        </div>
+
+        <div class="crypto-card">
+          <div class="crypto-card-header">
+            <div class="crypto-card-icon">🌐</div>
+            <h3>Web Crypto API — Sin Dependencias</h3>
+          </div>
+          <p>Toda la criptografía utiliza la API nativa del navegador (<code>window.crypto.subtle</code>). Sin librerías externas. Sin transmisión de claves. Todo se ejecuta en el <strong>sandbox del navegador</strong> con rendimiento nativo.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- What the server sees -->
+    <section class="about-section">
+      <div class="server-panel">
+        <h3>🛡️ ¿Qué ve el servidor?</h3>
+
+        <div class="data-preview">
+          <div class="data-item">
+            <div class="data-label">Clave Privada Almacenada</div>
+            <div class="data-value">aGVsbG8gd29ybGQ= [cifrada con AES-GCM, inaccesible sin tu contraseña]</div>
+          </div>
+          <div class="data-item">
+            <div class="data-label">Mensaje Recibido</div>
+            <div class="data-value">xK3bN9pQ7m... [blob binario cifrado, sin posibilidad de lectura]</div>
+          </div>
+          <div class="data-item">
+            <div class="data-label">Archivos Adjuntos</div>
+            <div class="data-value">0x4F 0x2A 0xBB... [bytes cifrados, nombres y tipos irreconocibles]</div>
+          </div>
+        </div>
+
+        <p class="conclusion">
+          <strong>Resultado:</strong> Incluso si el servidor fuera comprometido, el atacante solo encontraría datos binarios ininteligibles. Tu contraseña maestra es la única llave, y <strong>nunca sale de tu navegador</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Additional Security Features -->
+    <section class="about-section">
+      <div class="about-section-title">
+        <h2>Características adicionales</h2>
+        <p>Funcionalidades diseñadas para maximizar tu privacidad y control.</p>
+      </div>
+
+      <ul class="features-list">
+        <li>
+          <div class="feature-icon">🔗</div>
+          <div class="feature-text">
+            <h4>Enlaces de Un Solo Uso</h4>
+            <p>Genera enlaces que se destruyen automáticamente tras el primer envío exitoso. Perfecto para recibir información sensible de una sola fuente.</p>
+          </div>
+        </li>
+        <li>
+          <div class="feature-icon">🔒</div>
+          <div class="feature-text">
+            <h4>Enlace Público Desactivable</h4>
+            <p>Puedes desactivar tu enlace público en cualquier momento desde el dashboard. Cuando está desactivado, nadie puede enviarte archivos a través de él.</p>
+          </div>
+        </li>
+        <li>
+          <div class="feature-icon">💣</div>
+          <div class="feature-text">
+            <h4>Destrucción de Paquetes</h4>
+            <p>Elimina paquetes permanentemente del servidor después de leerlos. Los archivos cifrados se borran del disco sin posibilidad de recuperación.</p>
+          </div>
+        </li>
+        <li>
+          <div class="feature-icon">⚡</div>
+          <div class="feature-text">
+            <h4>Boss Key (Doble ESC)</h4>
+            <p>Pulsa Escape dos veces rápido para cerrar sesión instantáneamente. Tu clave privada se borra de la memoria RAM de forma inmediata.</p>
+          </div>
+        </li>
+        <li>
+          <div class="feature-icon">🔒</div>
+          <div class="feature-text">
+            <h4>HTTPS Obligatorio</h4>
+            <p>El servidor requiere HTTPS para funcionar, garantizando que las APIs criptográficas del navegador estén disponibles y que la conexión esté cifrada en tránsito.</p>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- Footer CTA -->
+    <section class="about-footer">
+      <h2>¿Listo para empezar?</h2>
+      <p>Tu buzón seguro te espera. Crea una cuenta o inicia sesión.</p>
+      <a href="/" class="btn primary">Ir al Login →</a>
+    </section>
+
+  </div>
+</body>
+</html>

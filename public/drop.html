@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow Drop | Secure Submission</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* Specific overrides for drop page */
+    .file-drop-area {
+      border: 2px dashed var(--border-color);
+      border-radius: 16px;
+      padding: 3rem 2rem;
+      text-align: center;
+      margin-bottom: 1.5rem;
+      background: var(--input-bg);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .file-drop-area:hover {
+      border-color: var(--accent-color);
+      background: #f0f7ff;
+      color: var(--accent-color);
+    }
+    .file-list {
+      list-style-type: none;
+      margin-top: 1.5rem;
+      text-align: left;
+    }
+    .file-list li {
+      padding: 0.875rem 1.25rem;
+      background: var(--input-bg);
+      border-radius: 12px;
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal-container">
+    <header>
+      <h1>Secure Drop Box</h1>
+      <p id="system-status" class="status-offline">Establishing secure connection...</p>
+    </header>
+
+    <main id="drop-panel" class="panel active">
+      <div class="form-group">
+        <label for="sender-name">Your Name / Username</label>
+        <input type="text" id="sender-name" placeholder="Anonymous" autocomplete="off" spellcheck="false">
+      </div>
+      
+      <div class="form-group">
+        <label for="message">Secure Message</label>
+        <textarea id="message" rows="5" placeholder="Enter your message here..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <div class="file-drop-area" id="file-drop-area">
+          <p>Click here to attach files or drag them here</p>
+          <input type="file" id="file-input" multiple class="hidden">
+          <ul class="file-list" id="file-list"></ul>
+        </div>
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-submit" class="btn primary" disabled>Encrypt & Send</button>
+      </div>
+      <div id="status-msg" class="msg"></div>
+    </main>
+
+    <main id="success-panel" class="panel hidden">
+      <h2>Transmission Successful</h2>
+      <p>The package has been encrypted and securely delivered to the receiver's vault.</p>
+      <p>Only the owner of the private key can decrypt this information. The server has zero knowledge of the contents.</p>
+      <br>
+      <button class="btn secondary" onclick="window.location.reload()">Send Another Package</button>
+    </main>
+  </div>
+
+  <script src="crypto.js"></script>
+  <script src="drop.js"></script>
+</body>
+</html>

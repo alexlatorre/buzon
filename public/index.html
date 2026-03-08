@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow Drop | Secured Receiver</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="auth-panel" class="auth-wrapper active">
+    <div class="login-container">
+      <header class="auth-header">
+        <h1>Shadow Drop</h1>
+        <p>Zero-Knowledge Secure Vault</p>
+      </header>
+      <div class="panel">
+        <h2>Authentication</h2>
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" placeholder="e.g. shadow_vault" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label for="password">Master Password</label>
+          <input type="password" id="password" autocomplete="off">
+        </div>
+        <div class="btn-group">
+          <button id="btn-login" class="btn primary">Login</button>
+          <button id="btn-register" class="btn secondary">Register Vault</button>
+        </div>
+        <div id="auth-msg" class="msg"></div>
+        <div class="about-link-wrapper">
+          <a href="/about.html" class="about-link">🔐 ¿Cómo funciona? Conoce nuestra seguridad →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dashboard-panel" class="app-layout hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Shadow Drop</h2>
+        <p id="system-status" class="status-offline">System: Offline</p>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-group">
+          <p class="nav-label">Main</p>
+          <a href="#" class="nav-item active">Inbox</a>
+        </div>
+        <div class="nav-group drop-link-group">
+          <p class="nav-label">Your Public Drop Link</p>
+          <a id="drop-link" href="#" target="_blank" class="accent-link drop-link-small"></a>
+        </div>
+        <div class="sidebar-section">
+          <h3>Privacy & Links</h3>
+          <div class="setting-item">
+            <span>Public Drop Link</span>
+            <label class="switch">
+              <input type="checkbox" id="toggle-public-link" checked>
+              <span class="slider round"></span>
+            </label>
+          </div>
+          <div class="one-time-section">
+            <button id="btn-gen-otl" class="btn secondary full-width mini">Generate One-Time Link</button>
+            <div id="otl-list" class="otl-list">
+              <!-- Tokens will appear here -->
+            </div>
+          </div>
+        </div>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="quota-display" class="quota-status">
+          <div class="quota-label">Mailbox Usage</div>
+          <div class="quota-bar"><div id="quota-fill" class="quota-fill"></div></div>
+          <div id="quota-text" class="quota-text">Checking...</div>
+        </div>
+        <button id="btn-logout" class="btn secondary full-width">Logout</button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+      <header class="top-navbar">
+        <div class="nav-title">
+          <h3>Inbox Vault</h3>
+        </div>
+        <div class="nav-actions">
+          <button id="btn-refresh" class="btn secondary">Refresh Inbox</button>
+        </div>
+      </header>
+      
+      <main class="content-scroll">
+        <div id="package-list" class="package-list">
+          <!-- Packages injected here -->
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="package-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Decrypted Package</h3>
+        <button id="btn-close-modal" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="meta-info">
+          <p><strong>Sender:</strong> <span id="modal-sender"></span></p>
+          <p><strong>Date:</strong> <span id="modal-date"></span></p>
+        </div>
+        <div class="message-box">
+          <h4>Message</h4>
+          <p id="modal-message"></p>
+        </div>
+        <div class="attachments-box">
+          <h4>Attachments</h4>
+          <ul id="modal-files"></ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-download-all" class="btn primary">Decrypt & Download</button>
+        <button id="btn-destroy" class="btn danger">Destroy Package</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="crypto.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
