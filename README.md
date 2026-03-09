@@ -80,6 +80,25 @@ Para mitigar el riesgo de que un atacante modifique los ficheros servidos:
 - **Destrucción de paquetes**: Eliminación permanente de archivos del servidor tras su lectura.
 - **Medidor de fuerza de contraseña**: Evalúa longitud, variedad de caracteres y unicidad en tiempo real.
 
+### 🔏 Hashes Confiables (SHA-256)
+Usa esta tabla como fuente de verdad externa para verificar que los ficheros servidos por tu instancia no han sido manipulados. Compara estos hashes con los que muestra el panel de integridad de la aplicación.
+
+| Fichero | SHA-256 |
+|---|---|
+| `app.js` | `09baca1c74f5262deb9b9d778431546e71570531a9a9f18622798dc0e5d99cc7` |
+| `crypto.js` | `27eca691dc43573d5a7eaaebcb5fed60aa40e23dc797647ef3c6df690850441c` |
+| `integrity.js` | `b5d6bbfd4140cc7468c2947f43ea9bf188e28f28c9ca4b7021d4d3386973832d` |
+| `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |
+| `style.css` | `19c2045f73525d692cd4897eadab7599b80fb133221c3fbc6e229885721704b5` |
+| `index.html` | `ee2a4a7982c60cab6fc55b93912bd80fbccba53f765235feff138076a840b91f` |
+| `drop.html` | `212cfaadd493f015dff8d832cb01f30139dcecf7eff48adcd5233d4d29277888` |
+| `about.html` | `ec956c4e8d367185f405db8a13854ae9290f050f9204ff64299eea72df5888f3` |
+
+> **Verificación manual**: Abre la consola del navegador (F12) y ejecuta:
+> ```javascript
+> fetch('/app.js').then(r=>r.text()).then(t=>crypto.subtle.digest('SHA-256',new TextEncoder().encode(t))).then(h=>console.log(Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('')))
+> ```
+
 ---
 
 ## 🐳 Docker
