@@ -431,7 +431,64 @@ async function downloadFiles() {
     }
 }
 
+// Password Strength Meter
+function evaluatePassword(pw) {
+    let score = 0;
+    if (!pw) return { score: 0, label: '', level: '' };
+
+    // Length scoring
+    if (pw.length >= 8) score += 1;
+    if (pw.length >= 12) score += 1;
+    if (pw.length >= 16) score += 1;
+    if (pw.length >= 24) score += 1;
+
+    // Character variety
+    if (/[a-z]/.test(pw)) score += 1;
+    if (/[A-Z]/.test(pw)) score += 1;
+    if (/[0-9]/.test(pw)) score += 1;
+    if (/[^a-zA-Z0-9]/.test(pw)) score += 1;
+
+    // Variety of unique chars
+    const unique = new Set(pw).size;
+    if (unique >= 8) score += 1;
+    if (unique >= 12) score += 1;
+
+    // Normalize to 0-4
+    const level = Math.min(4, Math.floor(score / 2.5));
+    const levels = [
+        { label: 'Muy débil', level: 'pw-very-weak' },
+        { label: 'Débil', level: 'pw-weak' },
+        { label: 'Aceptable', level: 'pw-fair' },
+        { label: 'Fuerte', level: 'pw-strong' },
+        { label: 'Muy fuerte', level: 'pw-very-strong' }
+    ];
+
+    return { score: level, ...levels[level] };
+}
+
+function updatePasswordStrength() {
+    const pw = document.getElementById('password').value;
+    const container = document.getElementById('pw-strength');
+    const fill = document.getElementById('pw-strength-fill');
+    const label = document.getElementById('pw-strength-label');
+
+    if (!pw) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+    const result = evaluatePassword(pw);
+    const percent = ((result.score + 1) / 5) * 100;
+
+    fill.style.width = percent + '%';
+    fill.className = 'pw-strength-fill ' + result.level;
+    label.textContent = result.label;
+    label.className = 'pw-strength-label ' + result.level;
+}
+
 // Event Listeners
+document.getElementById('password').addEventListener('input', updatePasswordStrength);
 btnRegister.addEventListener('click', handleRegister);
 btnLogin.addEventListener('click', handleLogin);
 btnLogout.addEventListener('click', secureLogout);

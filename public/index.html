@@ -22,6 +22,9 @@
         <div class="form-group">
           <label for="password">Master Password</label>
           <input type="password" id="password" autocomplete="off">
+          <div id="pw-strength" class="pw-strength hidden">
+            <div class="pw-strength-bar"><div id="pw-strength-fill" class="pw-strength-fill"></div></div>
+          </div>
         </div>
         <div class="btn-group">
           <button id="btn-login" class="btn primary">Login</button>
@@ -125,6 +128,7 @@
   </div>
 
   <script src="crypto.js"></script>
+  <script src="integrity.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

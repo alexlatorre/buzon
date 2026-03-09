@@ -2,9 +2,30 @@ const express = require('express');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const multer = require('multer');
 const cors = require('cors');
 const db = require('./db');
+
+// --- File Integrity System ---
+// Compute SHA-256 hashes of all critical public files at startup
+const INTEGRITY_FILES = ['app.js', 'crypto.js', 'drop.js', 'integrity.js', 'index.html', 'about.html', 'drop.html', 'style.css'];
+const fileHashes = {};
+
+function computeFileHashes() {
+    const publicDir = path.join(__dirname, 'public');
+    for (const file of INTEGRITY_FILES) {
+        const filePath = path.join(publicDir, file);
+        if (fs.existsSync(filePath)) {
+            const content = fs.readFileSync(filePath);
+            const hash = crypto.createHash('sha256').update(content).digest('hex');
+            fileHashes[file] = hash;
+        }
+    }
+    console.log(`[Integrity] Computed SHA-256 hashes for ${Object.keys(fileHashes).length} files`);
+}
+
+computeFileHashes();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -72,6 +93,14 @@ const dropStorage = multer.diskStorage({
 const upload = multer({ storage: dropStorage });
 
 // --- API Endpoints ---
+
+// 0. File Integrity Endpoint
+app.get('/api/integrity', (req, res) => {
+    res.json({
+        files: fileHashes,
+        serverBootTime: new Date().toISOString()
+    });
+});
 
 // 1. Auth / Register
 app.post('/api/auth/register', async (req, res) => {
