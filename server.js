@@ -11,6 +11,44 @@ const PORT = process.env.PORT || 4000;
 
 app.use(express.json({ limit: '5mb' }));
 app.use(cors());
+
+// --- Security Headers (CSP + hardening) ---
+app.use((req, res, next) => {
+    // Strict Content Security Policy — blocks all inline scripts and external sources
+    res.setHeader('Content-Security-Policy', [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",   // inline styles needed for some UI elements
+        "img-src 'self' data:",                // data: URIs for emoji rendering
+        "font-src 'self'",
+        "connect-src 'self'",                  // fetch/XHR only to same origin
+        "frame-src 'none'",                    // no iframes
+        "object-src 'none'",                   // no plugins/Flash
+        "base-uri 'self'",                     // prevent <base> tag hijacking
+        "form-action 'self'",                  // forms only submit to same origin
+        "frame-ancestors 'none'",              // prevent clickjacking (like X-Frame-Options)
+        "upgrade-insecure-requests"
+    ].join('; '));
+
+    // Prevent MIME type sniffing
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    // Clickjacking protection
+    res.setHeader('X-Frame-Options', 'DENY');
+
+    // Don't leak referrer info
+    res.setHeader('Referrer-Policy', 'no-referrer');
+
+    // Restrict browser features
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
+
+    // Prevent caching of sensitive data
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+
+    next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const DROP_DIR = path.join(__dirname, 'data', 'drop');

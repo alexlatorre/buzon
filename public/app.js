@@ -161,28 +161,37 @@ async function handleLogin() {
 }
 
 function secureLogout() {
-    // 1. Wipe sensitive keys from memory
-    currentUser = {
-        id: null,
-        masterKey: null,
-        privateKey: null
-    };
-    currentPackages = [];
-    selectedPackage = null;
-    currentPackageSessionKey = null;
+    try {
+        // 1. Wipe sensitive keys from memory
+        currentUser = {
+            id: null,
+            masterKey: null,
+            privateKey: null
+        };
+        currentPackages = [];
+        selectedPackage = null;
+        currentPackageSessionKey = null;
 
-    document.getElementById('password').value = '';
-    document.getElementById('email').value = '';
+        // 2. Clear form fields
+        document.getElementById('password').value = '';
+        document.getElementById('username').value = '';
 
-    dashPanel.classList.remove('active');
-    dashPanel.classList.add('hidden');
-    authPanel.classList.remove('hidden');
-    authPanel.classList.add('active');
+        // 3. Switch panels
+        dashPanel.classList.remove('active');
+        dashPanel.classList.add('hidden');
+        authPanel.classList.remove('hidden');
+        authPanel.classList.add('active');
 
-    sysStatus.textContent = 'System: Offline';
-    sysStatus.className = 'status-offline';
-    showMsg('Vault locked and memory wiped.', 'info');
-    closeModal();
+        // 4. Update status
+        sysStatus.textContent = 'System: Offline';
+        sysStatus.className = 'status-offline';
+        showMsg('Vault locked and memory wiped.', 'info');
+        closeModal();
+    } catch (e) {
+        // Force logout even if something fails
+        console.error('Logout error:', e);
+        window.location.reload();
+    }
 }
 
 async function fetchPackages() {
