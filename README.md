@@ -1,5 +1,7 @@
 # Shadow Drop (Secure DropBox)
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 Shadow Drop is a file and message delivery platform with **Zero-Knowledge** architecture. It allows anyone to send you information securely — the server is unable to read any content.
 
 https://gallifrey.sytes.net/
@@ -23,17 +25,18 @@ https://gallifrey.sytes.net/
 - Opening a package decrypts it in your browser.
 - Download files individually or all at once — original names and extensions are restored automatically.
 
-### 4. Security Page
-- From the login screen, click **"How does it work? Learn about our security →"** for a visual explanation of the crypto architecture.
+### 4. Security Page (About)
+- From the login screen, click **"How does it work? Learn about our security →"** for a full visual explanation.
+- Covers the **3-step user flow** (Registration → Sending → Receiving), a **real-time data flow diagram**, detailed breakdowns of each cryptographic primitive (PBKDF2, RSA-OAEP, AES-GCM, Web Crypto API), a **"What the server sees"** panel showing only encrypted blobs, and a list of additional security features.
 
 ### 5. Secure File Sharing
 - From the dashboard, click **📤 Share File** in the sidebar.
-- Select a file, set an **unlock password**, and optionally add a message.
-- Configure **expiration** (1h, 24h, 7 days, 30 days, or never) and **download limit**.
-- The browser encrypts the file with **AES-256-GCM** and protects the key with **PBKDF2** derived from the password.
-- A link is generated that you can copy and send to the recipient.
-- The recipient opens the link, enters the password, and the file is decrypted and downloaded **exclusively in their browser**.
-- The server never has access to the file contents or password.
+- **Drag & drop** a file onto the drop zone (or click to browse), set an **unlock password** with strength meter, and optionally add an encrypted message.
+- Configure **expiration** (1h, 24h, 7 days, 30 days, or never) and **download limit** (1, 5, 10, 25, unlimited).
+- The browser encrypts the file with **AES-256-GCM** and wraps the key with **PBKDF2** (600K iterations) derived from the password.
+- A unique shareable link is generated — copy it and send to the recipient.
+- The recipient opens the link, sees file info and remaining downloads/expiry, enters the password, and the file is decrypted and downloaded **exclusively in their browser**.
+- The server **never** has access to the file contents, the password, or the encryption key.
 
 ---
 
@@ -55,10 +58,14 @@ All cryptographic processing occurs **exclusively in the user's Browser** using 
 Strict HTTP security headers: `script-src 'self'` (blocks XSS), `frame-ancestors 'none'` (anti-clickjacking), `no-referrer`, `no-store`, disabled camera/microphone/geolocation.
 
 ### File Integrity Verification
-1. **Server hashing**: On startup, SHA-256 hashes are computed for all critical public files and exposed at `/api/integrity`.
-2. **Client verification**: The browser independently computes hashes and compares them.
-3. **Change detection (localStorage)**: First-visit fingerprints are stored; any change triggers an integrity alert.
-4. **GitHub verification**: Links to source code on [GitHub](https://github.com/alexlatorre/buzon/tree/master/public) for external verification.
+All **10 frontend files** (JS, CSS, and HTML) are verified on every page load:
+1. **Server hashing**: On startup, SHA-256 hashes are computed for all public files and exposed at `/api/integrity`.
+2. **Client verification**: The browser independently fetches and hashes each file, comparing against the server's reported values (detects MITM/proxy tampering).
+3. **Change detection (localStorage)**: First-visit fingerprints are stored; any subsequent change triggers an **integrity alert** banner with affected file names.
+4. **GitHub verification**: Each file in the hash panel links directly to its source on [GitHub](https://github.com/alexlatorre/buzon/tree/master/public) for external comparison.
+5. **Accept or reject**: Users can review changes and accept them as trusted, or refuse to enter credentials.
+
+> **Note**: An attacker controlling the server could rewrite `integrity.js` to bypass this check. Always compare hashes against this README or the GitHub repo as an external source of truth.
 
 ### Other Security Features
 - **Boss Key** (double ESC): Instant session logout with memory wipe.
@@ -144,16 +151,20 @@ module.exports = {
 
 ## 📂 Project Structure
 - `/public`: Frontend (Vanilla JS, HTML, CSS). Apple-inspired premium design.
+  - `app.js`: Main application logic (auth, inbox, packages, sidebar, share modal).
   - `crypto.js`: Cryptographic utilities (PBKDF2, RSA-OAEP, AES-GCM).
-  - `integrity.js`: File integrity verification system.
-  - `share.js`: Secure file sharing (PBKDF2 + AES-GCM decryption).
-  - `about.html`: Security information page.
-  - `share.html`: Password-protected file download page.
+  - `integrity.js`: Client-side file integrity verification (all 10 files).
+  - `share.js`: Secure file sharing download page logic (PBKDF2 + AES-GCM decryption).
+  - `drop.js`: Public/one-time link file upload logic.
+  - `about.html`: Security deep-dive page (crypto flow, architecture, features).
+  - `share.html`: Password-protected file download page for recipients.
+  - `drop.html`: Drag & drop file submission page for senders.
 - `/db`: Database drivers (SQLite/MySQL).
-- `/data`: Local storage (database + encrypted files).
+- `/data`: Local storage (database + encrypted files + shared files).
 - `server.js`: Backend API (Express) with CSP and security headers.
 - `config.js`: Global configuration.
 - `Dockerfile`: Alpine + Node 20 Docker image.
+- `LICENSE`: AGPL-3.0 open-source license.
 
 ---
 ---
@@ -166,14 +177,16 @@ Shadow Drop es una plataforma de entrega de archivos y mensajes con arquitectura
 1. **Registro**: Elige usuario y contraseña maestra. **Si la pierdes, nadie puede recuperar tus datos.**
 2. **Recibir archivos**: Comparte tu enlace público o genera enlaces de un solo uso.
 3. **Descargar**: Los paquetes se descifran en tu navegador. Descarga individual o masiva.
-4. **Compartir ficheros**: Pulsa 📤 Share File → selecciona archivo + contraseña → se cifra con AES-256 + PBKDF2 → comparte el enlace. El receptor introduce la contraseña para descifrar.
+4. **Compartir ficheros**: Pulsa 📤 Share File → arrastra un archivo al área de drop (o selecciona) + contraseña con medidor de fuerza → se cifra con AES-256-GCM + PBKDF2 (600K iteraciones) → comparte el enlace generado. El receptor introduce la contraseña para descifrar y descargar.
+5. **Página de seguridad**: Desde el login, accede a la explicación visual completa de la arquitectura cripto (flujo de datos, primitivas, qué ve el servidor).
 
 ## Seguridad
 - **E2EE real** con RSA-4096 + AES-256-GCM + PBKDF2 (600K iteraciones).
 - **CSP estricta**: Solo scripts propios, sin iframes, sin caché.
-- **Verificación de integridad**: Hashes SHA-256 verificados contra GitHub.
+- **Verificación de integridad de los 10 ficheros del frontend**: Hashes SHA-256 verificados contra el servidor, localStorage y GitHub.
 - **Boss Key** (doble ESC), enlaces de un solo uso, destrucción de paquetes.
 - **Diseño responsive**: Optimizado para móviles y tablets.
+- **Licencia**: AGPL-3.0 — código abierto, forks obligados a publicar cambios.
 
 ## Docker
 ```bash
