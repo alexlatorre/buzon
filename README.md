@@ -67,7 +67,14 @@ All **10 frontend files** (JS, CSS, and HTML) are verified on every page load:
 
 > **Note**: An attacker controlling the server could rewrite `integrity.js` to bypass this check. Always compare hashes against this README or the GitHub repo as an external source of truth.
 
-### Other Security Features
+### Advanced Security Mechanics
+- **Zero-Knowledge Auth Hash**: Login provides mathematical proof of the master key without transmitting the password or the key itself via a computationally linked Server Auth Hash.
+- **Strict Session Management**: Stateful, token-based (`Authorization: Bearer`) protection on all endpoints that interact with user resources.
+- **Anti-DoS & Rate Limiting**: `express-rate-limit` protects authentication and upload endpoints, fully supporting reverse proxies (`trust proxy`).
+- **Disk Exhaustion Quotas**: Both "Drop" and "Share" endpoints calculate and enforce a strict 500MB combined user quota.
+- **Path Traversal Protection**: Cryptographically strict UUIDv4 regex validation on all routing parameters.
+- **Network Hardening**: HSTS `Strict-Transport-Security` enforced, wildcard CORS removed, and MIME-sniffing disabled.
+- **Anti-Enumeration**: Uniform error messages on login and fake-salt routing to mask registered users.
 - **Boss Key** (double ESC): Instant session logout with memory wipe.
 - **One-Time Links**: Auto-invalidated after first submission.
 - **Disable Public Link**: Cut external access at any time.
