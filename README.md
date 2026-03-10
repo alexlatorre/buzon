@@ -191,7 +191,18 @@ Shadow Drop es una plataforma de entrega de archivos y mensajes con arquitectura
 - **E2EE real** con RSA-4096 + AES-256-GCM + PBKDF2 (600K iteraciones).
 - **CSP estricta**: Solo scripts propios, sin iframes, sin caché.
 - **Verificación de integridad de los 10 ficheros del frontend**: Hashes SHA-256 verificados contra el servidor, localStorage y GitHub.
-- **Boss Key** (doble ESC), enlaces de un solo uso, destrucción de paquetes.
+## Seguridad Avanzada
+- **Zero-Knowledge Auth Hash**: El inicio de sesión demuestra matemáticamente el conocimiento de la clave maestra sin transmitir jamás la contraseña por la red.
+- **Gestión estricta de sesiones**: Protección mediante tokens con estado (`Authorization: Bearer`) para todos los endpoints que interactúan con recursos de usuario.
+- **Anti-DoS y Limitación de Peticiones**: Protección contra fuerza bruta con soporte total para proxys inversos en Docker (`trust proxy`).
+- **Cuotas de prevención contra agotamiento de disco**: Límite estricto de 500MB combinado entre todos los paquetes ("Drop" y compartidos protegidos con contraseña).
+- **Protección contra Path Traversal**: Validación criptográfica estricta mediante expresiones regulares en los UUIDv4 de todas las rutas de la API.
+- **Endurecimiento de Red**: Forzado de HTTPS absoluto con cabecera HSTS `Strict-Transport-Security` y limitación total de CORS.
+- **Anti-Enumeración de Usuarios**: Respuestas de error unificadas y enrutamiento con *sal* falsa para ocultar qué usuarios están registrados.
+- **Boss Key** (doble ESC): Cierre instantáneo de sesión con borrado de memoria RAM.
+- **Enlaces de un solo uso**: Invalidados automáticamente tras la primera visualización.
+- **Desactivación de enlace público**: Corta el acceso de las subidas anónimas al instante.
+- **Destrucción de paquetes**: Borrado permanente del servidor tras la lectura.
 - **Diseño responsive**: Optimizado para móviles y tablets.
 - **Licencia**: AGPL-3.0 — código abierto, forks obligados a publicar cambios.
 
