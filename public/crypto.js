@@ -168,5 +168,20 @@ const CryptoUtils = {
             true,
             ["encrypt", "decrypt"]
         );
+    },
+
+    // Compute Server Authentication Hash from Master Key
+    computeServerAuthHash: async function (masterKey) {
+        const rawKey = await window.crypto.subtle.exportKey("raw", masterKey);
+        const encoder = new TextEncoder();
+        const suffix = encoder.encode("SERVER_AUTH");
+
+        // Concatenate rawKey + "SERVER_AUTH"
+        const combined = new Uint8Array(rawKey.byteLength + suffix.byteLength);
+        combined.set(new Uint8Array(rawKey), 0);
+        combined.set(suffix, rawKey.byteLength);
+
+        const hashBuffer = await window.crypto.subtle.digest("SHA-256", combined);
+        return this.bufferToBase64(hashBuffer);
     }
 };

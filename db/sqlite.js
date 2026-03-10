@@ -15,6 +15,7 @@ db.exec(`
     public_key TEXT,
     encrypted_private_key TEXT,
     iv TEXT,
+    server_auth_hash TEXT,
     public_link_enabled INTEGER DEFAULT 1,
     mailbox_quota INTEGER DEFAULT 524288000,
     last_login DATETIME
@@ -83,14 +84,19 @@ if (!userCols.find(c => c.name === 'mailbox_quota')) {
 if (!userCols.find(c => c.name === 'last_login')) {
     db.exec("ALTER TABLE users ADD COLUMN last_login DATETIME");
 }
+if (!userCols.find(c => c.name === 'server_auth_hash')) {
+    // For existing users, we cannot magically compute the hash because we don't know their masterKey.
+    // They will be locked out unless they re-register or we reset their accounts.
+    db.exec("ALTER TABLE users ADD COLUMN server_auth_hash TEXT DEFAULT 'LEGACY_MIGRATION_REQUIRED'");
+}
 
 module.exports = {
-    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv) => {
+    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash) => {
         const id = uuidv4();
         db.prepare(`
-            INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, last_login)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(id, username, salt, publicKey, encryptedPrivateKey, iv, new Date().toISOString());
+            INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date().toISOString());
         return id;
     },
 
@@ -104,6 +110,10 @@ module.exports = {
 
     updateLastLogin: async (userId) => {
         db.prepare('UPDATE users SET last_login = ? WHERE id = ?').run(new Date().toISOString(), userId);
+    },
+
+    updateServerAuthHash: async (userId, hash) => {
+        db.prepare('UPDATE users SET server_auth_hash = ? WHERE id = ?').run(hash, userId);
     },
 
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv) => {

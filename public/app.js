@@ -4,7 +4,8 @@
 let currentUser = {
     id: null,
     masterKey: null,
-    privateKey: null
+    privateKey: null,
+    sessionToken: null
 };
 
 let currentPackages = [];
@@ -53,16 +54,19 @@ async function handleRegister() {
         const saltBuffer = CryptoUtils.base64ToBuffer(saltBase64);
         const masterKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
 
-        // 2. Generate RSA Key Pair
+        // 2. Compute Server Auth Hash
+        const serverAuthHash = await CryptoUtils.computeServerAuthHash(masterKey);
+
+        // 3. Generate RSA Key Pair
         const keyPair = await CryptoUtils.generateRSAKeyPair();
         const pubKeyBase64 = await CryptoUtils.exportPublicKey(keyPair.publicKey);
         const privKeyBase64 = await CryptoUtils.exportPrivateKey(keyPair.privateKey);
 
-        // 3. Encrypt Private Key with Master Key
+        // 4. Encrypt Private Key with Master Key
         const privKeyBuffer = new TextEncoder().encode(privKeyBase64);
         const encryptedPrivResult = await CryptoUtils.encryptSymmetric(masterKey, privKeyBuffer);
 
-        // 4. Send to Server
+        // 5. Send to Server
         showMsg('Uploading vault to server...', 'info');
         const res = await fetch('/api/auth/register', {
             method: 'POST',
@@ -72,7 +76,8 @@ async function handleRegister() {
                 salt: saltBase64,
                 publicKey: pubKeyBase64,
                 encryptedPrivateKey: encryptedPrivResult.ciphertext,
-                iv: encryptedPrivResult.iv
+                iv: encryptedPrivResult.iv,
+                serverAuthHash: serverAuthHash
             })
         });
 
@@ -99,22 +104,30 @@ async function handleLogin() {
     try {
         showMsg('Authenticating...', 'info');
 
-        // 1. Fetch encrypted details from server
+        // 1. Fetch user salt from server
+        const saltRes = await fetch(`/api/auth/salt/${encodeURIComponent(username)}`);
+        const saltData = await saltRes.json();
+
+        if (!saltRes.ok) throw new Error('Invalid credentials'); // Mask user existence
+
+        // 2. Derive Master Key and Server Auth Hash
+        showMsg('Deriving master key...', 'info');
+        const saltBuffer = CryptoUtils.base64ToBuffer(saltData.salt);
+        const masterKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
+        const serverAuthHash = await CryptoUtils.computeServerAuthHash(masterKey);
+
+        // 3. Authenticate with server using Server Auth Hash
+        showMsg('Verifying credentials...', 'info');
         const res = await fetch('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username })
+            body: JSON.stringify({ username, serverAuthHash })
         });
 
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error(data.error || 'Invalid credentials');
 
-        // 2. Derive Master Key
-        showMsg('Deriving master key...', 'info');
-        const saltBuffer = CryptoUtils.base64ToBuffer(data.salt);
-        const masterKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
-
-        // 3. Decrypt Private Key
+        // 4. Decrypt Private Key
         showMsg('Decrypting private key in memory...', 'info');
         let privKeyBuffer;
         try {
@@ -135,7 +148,8 @@ async function handleLogin() {
         currentUser = {
             id: data.id,
             masterKey,
-            privateKey
+            privateKey,
+            sessionToken: data.sessionToken
         };
 
         const dropUrl = `${window.location.protocol}//${window.location.host}/drop.html?id=${data.id}`;
@@ -162,11 +176,20 @@ async function handleLogin() {
 
 function secureLogout() {
     try {
+        // Call logout API
+        if (currentUser && currentUser.sessionToken) {
+            fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+            }).catch(e => console.error('Logout API error', e));
+        }
+
         // 1. Wipe sensitive keys from memory
         currentUser = {
             id: null,
             masterKey: null,
-            privateKey: null
+            privateKey: null,
+            sessionToken: null
         };
         currentPackages = [];
         selectedPackage = null;
@@ -199,7 +222,9 @@ async function fetchPackages() {
 
     btnRefresh.textContent = 'Scanning...';
     try {
-        const res = await fetch(`/api/packages/${currentUser.id}`);
+        const res = await fetch(`/api/packages/${currentUser.id}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        });
         const data = await res.json();
         if (res.ok) {
             currentPackages = data;
@@ -332,7 +357,10 @@ async function destroyPackage() {
 
     btnDestroy.textContent = 'Destroying...';
     try {
-        const res = await fetch(`/api/package/${selectedPackage.id}`, { method: 'DELETE' });
+        const res = await fetch(`/api/package/${selectedPackage.id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        });
         if (res.ok) {
             closeModal();
             await fetchPackages(); // Ensure packages are re-fetched and rendered
@@ -384,7 +412,9 @@ async function downloadFile(f) {
     if (!selectedPackage || !currentPackageSessionKey) return;
 
     try {
-        const res = await fetch(`/api/package/${selectedPackage.id}/file/${f.id}`);
+        const res = await fetch(`/api/package/${selectedPackage.id}/file/${f.id}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        });
         if (!res.ok) throw new Error('Download failed');
 
         const fileBlob = await res.blob();
@@ -520,7 +550,10 @@ togglePublicLink.addEventListener('change', async () => {
         const enabled = togglePublicLink.checked;
         await fetch(`/api/user/${currentUser.id}/config`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentUser.sessionToken}`
+            },
             body: JSON.stringify({ publicLinkEnabled: enabled })
         });
         updateQuotaDisplay(); // Refresh UI bits
@@ -532,7 +565,10 @@ togglePublicLink.addEventListener('change', async () => {
 btnGenOTL.addEventListener('click', async () => {
     if (!currentUser) return;
     try {
-        const res = await fetch(`/api/user/${currentUser.id}/one-time-link`, { method: 'POST' });
+        const res = await fetch(`/api/user/${currentUser.id}/one-time-link`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        });
         const data = await res.json();
         if (res.ok) {
             fetchOneTimeLinks();
@@ -545,7 +581,9 @@ btnGenOTL.addEventListener('click', async () => {
 async function fetchOneTimeLinks() {
     if (!currentUser) return;
     try {
-        const res = await fetch(`/api/user/${currentUser.id}/one-time-links`);
+        const res = await fetch(`/api/user/${currentUser.id}/one-time-links`, {
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        });
         const links = await res.json();
         if (res.ok) {
             renderOneTimeLinks(links);
@@ -589,7 +627,10 @@ function renderOneTimeLinks(links) {
             e.stopPropagation();
             if (confirm("Delete this one-time link?")) {
                 try {
-                    const res = await fetch(`/api/user/${currentUser.id}/one-time-link/${l.token}`, { method: 'DELETE' });
+                    const res = await fetch(`/api/user/${currentUser.id}/one-time-link/${l.token}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+                    });
                     if (res.ok) fetchOneTimeLinks();
                 } catch (err) {
                     console.error('Failed to delete OTL', err);
@@ -807,7 +848,11 @@ async function handleShareUpload() {
             formData.append('messageIv', messageIv);
         }
 
-        const res = await fetch(`/api/share/${sessionState.uuid}`, { method: 'POST', body: formData });
+        const res = await fetch(`/api/share/${currentUser.id}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` },
+            body: formData
+        });
         const data = await res.json();
 
         if (!res.ok) throw new Error(data.error || 'Upload failed');

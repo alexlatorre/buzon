@@ -80,8 +80,8 @@ Use this table as an external source of truth to verify that files served by you
 
 | File | SHA-256 |
 |---|---|
-| `app.js` | `8d708cdca3371eacf0a5428dbae0fea2e35c21119d501fa0fc925450faab256e` |
-| `crypto.js` | `27eca691dc43573d5a7eaaebcb5fed60aa40e23dc797647ef3c6df690850441c` |
+| `app.js` | `28d2aaddd82ce04f808fc070662e319a8b1dfca842c8186ce82dd76d63cdfe36` |
+| `crypto.js` | `f27ed04bb2acba0045e0433d77c4e1058af5d3313b44b4303311fd8d4b5f8d68` |
 | `integrity.js` | `0a897a7a4869fb40a52b996b76ae52a60c1af548913ae2bce8e2e9cdd980e053` |
 | `share.js` | `cc9a1a55b27713204604ed323f18682b62a4e3b0cfcef904317e4bc1ba571a91` |
 | `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |

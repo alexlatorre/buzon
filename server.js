@@ -4,8 +4,63 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
-const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
+const rateLimit = require('express-rate-limit');
 const db = require('./db');
+
+// --- Session Management ---
+const sessions = new Map(); // token -> { userId, createdAt }
+const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function createSession(userId) {
+    const token = crypto.randomUUID();
+    sessions.set(token, { userId, createdAt: Date.now() });
+    return token;
+}
+
+function validateSession(token) {
+    const session = sessions.get(token);
+    if (!session) return null;
+    if (Date.now() - session.createdAt > SESSION_TTL) {
+        sessions.delete(token);
+        return null;
+    }
+    return session;
+}
+
+function destroySession(token) {
+    sessions.delete(token);
+}
+
+// Cleanup expired sessions every hour
+setInterval(() => {
+    const now = Date.now();
+    for (const [token, session] of sessions) {
+        if (now - session.createdAt > SESSION_TTL) sessions.delete(token);
+    }
+}, 60 * 60 * 1000);
+
+// Auth middleware — extracts and validates session from Authorization header
+function requireAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+    const token = authHeader.slice(7);
+    const session = validateSession(token);
+    if (!session) {
+        return res.status(401).json({ error: 'Invalid or expired session' });
+    }
+    req.session = session;
+    req.sessionToken = token;
+    next();
+}
+
+// UUID format validator
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUUID(str) {
+    return UUID_REGEX.test(str);
+}
 
 // --- File Integrity System ---
 // Compute SHA-256 hashes of all critical public files at startup
@@ -31,7 +86,18 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(express.json({ limit: '5mb' }));
-app.use(cors());
+
+// Rate limiting
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { error: 'Too many attempts, try again later' } });
+const dropLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: { error: 'Too many uploads, try again later' } });
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Too many requests, try again later' } });
+app.use('/api/auth/', authLimiter);
+app.use('/api/drop/', dropLimiter);
+app.use('/api/', apiLimiter);
+
+// Trust the first reverse proxy to allow rate limiters to see real IPs
+// Required because Dockerized apps are usually accessed via an ingress proxy like Nginx/Traefik
+app.set('trust proxy', 1);
 
 // --- Security Headers (CSP + hardening) ---
 app.use((req, res, next) => {
@@ -50,6 +116,9 @@ app.use((req, res, next) => {
         "frame-ancestors 'none'",              // prevent clickjacking (like X-Frame-Options)
         "upgrade-insecure-requests"
     ].join('; '));
+
+    // HSTS — enforce HTTPS for 1 year
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 
     // Prevent MIME type sniffing
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -83,32 +152,30 @@ const dropStorage = multer.diskStorage({
         cb(null, DROP_DIR);
     },
     filename: (req, file, cb) => {
-        // Will be changed to packageId_fileId later, but multer is executed before we have the packageId
-        // Because package fields come in req.body which is parsed together with the files.
-        // Instead we assign a temporary UUID to the file.
-        const { v4: uuidv4 } = require('uuid');
         cb(null, `${uuidv4()}_${file.originalname}`);
     }
 });
-const upload = multer({ storage: dropStorage });
+const upload = multer({ storage: dropStorage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max per file
 
 // --- API Endpoints ---
 
 // 0. File Integrity Endpoint
 app.get('/api/integrity', (req, res) => {
-    res.json({
-        files: fileHashes,
-        serverBootTime: new Date().toISOString()
-    });
+    res.json({ files: fileHashes });
 });
 
 // 1. Auth / Register
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { username, salt, publicKey, encryptedPrivateKey, iv } = req.body;
+        const { username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash } = req.body;
 
-        if (!username || !salt || !publicKey || !encryptedPrivateKey || !iv) {
+        if (!username || !salt || !publicKey || !encryptedPrivateKey || !iv || !serverAuthHash) {
             return res.status(400).json({ error: 'Missing required registration data' });
+        }
+
+        // Validate username format
+        if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
+            return res.status(400).json({ error: 'Username: 3-32 characters, alphanumeric and underscores only' });
         }
 
         const existingUser = await db.getUserByUsername(username);
@@ -116,7 +183,7 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(409).json({ error: 'User already exists' });
         }
 
-        const id = await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv);
+        const id = await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash);
         res.json({ success: true, userId: id });
     } catch (error) {
         console.error('Registration error:', error);
@@ -124,30 +191,64 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// 2. Auth / Login Data (Retrieves the encrypted private key and IV to decrypt in the browser)
+// 2. Auth / Login (Two-step process)
+// Step 1: Get the salt
+app.get('/api/auth/salt/:username', async (req, res) => {
+    try {
+        const user = await db.getUserByUsername(req.params.username);
+        if (!user) {
+            // Return a fake salt to prevent timing/enumeration attacks
+            return res.json({ salt: 'FAKE_SALT_PREVENTS_ENUMERATION_xyz123==' });
+        }
+        res.json({ salt: user.salt });
+    } catch (error) {
+        console.error('Salt fetch error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Step 2: Login with Server Auth Hash
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { username } = req.body;
-        if (!username) return res.status(400).json({ error: 'Username required' });
+        const { username, serverAuthHash } = req.body;
+        if (!username || !serverAuthHash) return res.status(400).json({ error: 'Missing credentials' });
 
         const user = await db.getUserByUsername(username);
         if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Verify Server Auth Hash or perform legacy TOFU migration
+        if (user.server_auth_hash === 'LEGACY_MIGRATION_REQUIRED') {
+            console.log(`[Auth] Performing Trust-On-First-Use migration for legacy user: ${username}`);
+            await db.updateServerAuthHash(user.id, serverAuthHash);
+        } else if (user.server_auth_hash !== serverAuthHash) {
+            return res.status(401).json({ error: 'Invalid credentials' });
         }
 
         // Update Last Login
         await db.updateLastLogin(user.id);
 
+        // Create session token
+        const sessionToken = createSession(user.id);
+
         res.json({
             id: user.id,
             salt: user.salt,
             encryptedPrivateKey: user.encrypted_private_key,
-            iv: user.iv
+            iv: user.iv,
+            sessionToken
         });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Server error during login' });
     }
+});
+
+// Logout — destroy session
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+    destroySession(req.sessionToken);
+    res.json({ success: true });
 });
 
 // 3. Get User Public Key (For the sender to encrypt files)
@@ -197,9 +298,12 @@ app.get('/api/user/:uuid/quota', async (req, res) => {
     }
 });
 
-// 3.2 Link Management API
-app.post('/api/user/:uuid/config', async (req, res) => {
+// 3.2 Link Management API (protected)
+app.post('/api/user/:uuid/config', requireAuth, async (req, res) => {
     try {
+        if (req.session.userId !== req.params.uuid) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         const { public_link_enabled } = req.body;
         await db.togglePublicLink(req.params.uuid, public_link_enabled);
         res.json({ success: true });
@@ -208,8 +312,11 @@ app.post('/api/user/:uuid/config', async (req, res) => {
     }
 });
 
-app.post('/api/user/:uuid/one-time-link', async (req, res) => {
+app.post('/api/user/:uuid/one-time-link', requireAuth, async (req, res) => {
     try {
+        if (req.session.userId !== req.params.uuid) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         const token = await db.generateOneTimeLink(req.params.uuid);
         res.json({ token });
     } catch (err) {
@@ -218,8 +325,11 @@ app.post('/api/user/:uuid/one-time-link', async (req, res) => {
     }
 });
 
-app.get('/api/user/:uuid/one-time-links', async (req, res) => {
+app.get('/api/user/:uuid/one-time-links', requireAuth, async (req, res) => {
     try {
+        if (req.session.userId !== req.params.uuid) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         const links = await db.getOneTimeLinks(req.params.uuid);
         res.json(links);
     } catch (err) {
@@ -228,8 +338,11 @@ app.get('/api/user/:uuid/one-time-links', async (req, res) => {
     }
 });
 
-app.delete('/api/user/:uuid/one-time-link/:token', async (req, res) => {
+app.delete('/api/user/:uuid/one-time-link/:token', requireAuth, async (req, res) => {
     try {
+        if (req.session.userId !== req.params.uuid) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         await db.deleteOneTimeLink(req.params.token, req.params.uuid);
         res.json({ success: true });
     } catch (err) {
@@ -242,6 +355,11 @@ app.delete('/api/user/:uuid/one-time-link/:token', async (req, res) => {
 app.post('/api/drop/:id', upload.array('files'), async (req, res) => {
     try {
         const idOrToken = req.params.id;
+        if (!isValidUUID(idOrToken)) {
+            if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
+            return res.status(400).json({ error: 'Invalid link format' });
+        }
+
         let user = await db.getUserById(idOrToken);
         let isToken = false;
 
@@ -252,20 +370,24 @@ app.post('/api/drop/:id', upload.array('files'), async (req, res) => {
         }
 
         if (!user) {
-            // Clean up uploaded files
-            if (req.files) req.files.forEach(f => { fs.unlinkSync(f.path); });
+            if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
             return res.status(404).json({ error: 'Recipient or valid link not found' });
         }
 
         const userId = user.id;
-        const { senderName, encryptedSessionKey, encryptedMessage, messageIv } = req.body;
+        let { senderName, encryptedSessionKey, encryptedMessage, messageIv } = req.body;
         const files = req.files || [];
+
+        // Sanitize senderName
+        if (senderName) {
+            senderName = String(senderName).substring(0, 64).replace(/<[^>]*>/g, '');
+        }
 
         // Validate Quota
         const used = await db.getUserMailboxUsage(userId);
         const incomingSize = files.reduce((acc, f) => acc + f.size, 0);
         if (used + incomingSize > user.mailbox_quota) {
-            if (req.files) req.files.forEach(f => { fs.unlinkSync(f.path); });
+            if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
             return res.status(413).json({ error: 'Mailbox quota exceeded' });
         }
 
@@ -286,19 +408,18 @@ app.post('/api/drop/:id', upload.array('files'), async (req, res) => {
     } catch (error) {
         console.error('Drop error:', error);
         if (req.files) {
-            req.files.forEach(f => { fs.unlinkSync(f.path).catch(() => { }); });
+            req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
         }
         res.status(500).json({ error: 'Server error processing drop' });
     }
 });
 
-// 5. Get Pending Packages (For the receiver dashboard)
-app.get('/api/packages/:uuid', async (req, res) => {
-    // In a real world scenario there should be a token/session check here
-    // For simplicity we use the UUID, but it should be protected
-    // Since packages are strictly encrypted with the private key, even if someone lists them,
-    // they can't decrypt them without the user's password.
+// 5. Get Pending Packages (protected)
+app.get('/api/packages/:uuid', requireAuth, async (req, res) => {
     try {
+        if (req.session.userId !== req.params.uuid) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         const packages = await db.getPackagesByUserId(req.params.uuid);
         res.json(packages);
     } catch (error) {
@@ -308,9 +429,13 @@ app.get('/api/packages/:uuid', async (req, res) => {
 });
 
 // 6. Download a specific file
-app.get('/api/package/:packageId/file/:fileId', async (req, res) => {
+app.get('/api/package/:packageId/file/:fileId', requireAuth, async (req, res) => {
     try {
         const { packageId, fileId } = req.params;
+        // Validate UUID format to prevent path traversal
+        if (!isValidUUID(packageId) || !isValidUUID(fileId)) {
+            return res.status(400).json({ error: 'Invalid ID format' });
+        }
         const filePath = path.join(DROP_DIR, `${packageId}_${fileId}`);
 
         if (fs.existsSync(filePath)) {
@@ -325,17 +450,23 @@ app.get('/api/package/:packageId/file/:fileId', async (req, res) => {
 });
 
 // 7. Delete Package
-app.delete('/api/package/:packageId', async (req, res) => {
+app.delete('/api/package/:packageId', requireAuth, async (req, res) => {
     try {
         const { packageId } = req.params;
+        if (!isValidUUID(packageId)) {
+            return res.status(400).json({ error: 'Invalid ID format' });
+        }
         const pkg = await db.getPackageById(packageId);
+
+        // Verify ownership
+        if (pkg && pkg.user_id !== req.session.userId) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
 
         if (pkg && pkg.files) {
             pkg.files.forEach(f => {
                 const filePath = path.join(DROP_DIR, `${packageId}_${f.id}`);
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                }
+                try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
             });
         }
 
@@ -360,12 +491,16 @@ const shareStorage = multer.diskStorage({
         cb(null, uniqueName);
     }
 });
-const shareUpload = multer({ storage: shareStorage });
+const shareUpload = multer({ storage: shareStorage, limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB max
 
 // 8. Create Share (Upload encrypted file)
-app.post('/api/share/:userId', shareUpload.single('file'), async (req, res) => {
+app.post('/api/share/:userId', requireAuth, shareUpload.single('file'), async (req, res) => {
     try {
         const { userId } = req.params;
+        if (req.session.userId !== userId) {
+            if (req.file) try { fs.unlinkSync(req.file.path); } catch { }
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv, maxDownloads, expiresIn } = req.body;
 
         if (!req.file || !encryptedFileKey || !keyIv || !salt || !fileIv || !originalName) {
@@ -374,6 +509,24 @@ app.post('/api/share/:userId', shareUpload.single('file'), async (req, res) => {
         }
 
         const token = crypto.randomUUID();
+
+        // Validate Quota (shares count towards the same mailbox quota as drops)
+        const user = await db.getUserById(userId);
+        if (!user) {
+            if (req.file) try { fs.unlinkSync(req.file.path); } catch { }
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        let usedQuota = await db.getUserMailboxUsage(userId);
+        // Also add the active shares to the quota check
+        const shares = await db.getSharesByUserId(userId);
+        const sharesSize = shares.reduce((acc, s) => acc + s.size, 0);
+        usedQuota += sharesSize;
+
+        if (usedQuota + req.file.size > user.mailbox_quota) {
+            if (req.file) try { fs.unlinkSync(req.file.path); } catch { }
+            return res.status(413).json({ error: 'Storage quota exceeded' });
+        }
 
         // Calculate expiry date
         let expiresAt = null;
@@ -406,17 +559,20 @@ app.post('/api/share/:userId', shareUpload.single('file'), async (req, res) => {
 // 9. Get Share Metadata (public — no auth)
 app.get('/api/share/:token/meta', async (req, res) => {
     try {
+        if (!isValidUUID(req.params.token)) {
+            return res.status(400).json({ error: 'Invalid token format' });
+        }
         const share = await db.getShareByToken(req.params.token);
         if (!share) return res.status(404).json({ error: 'Share not found' });
 
         // Check expiry
         if (share.expires_at && new Date(share.expires_at) < new Date()) {
-            return res.status(410).json({ error: 'Este enlace ha expirado' });
+            return res.status(410).json({ error: 'This link has expired' });
         }
 
         // Check download limit
         if (share.max_downloads > 0 && share.download_count >= share.max_downloads) {
-            return res.status(410).json({ error: 'Se ha alcanzado el límite de descargas' });
+            return res.status(410).json({ error: 'Download limit reached' });
         }
 
         res.json({
@@ -443,17 +599,20 @@ app.get('/api/share/:token/meta', async (req, res) => {
 // 10. Download Encrypted Share File
 app.get('/api/share/:token/download', async (req, res) => {
     try {
+        if (!isValidUUID(req.params.token)) {
+            return res.status(400).json({ error: 'Invalid token format' });
+        }
         const share = await db.getShareByToken(req.params.token);
         if (!share) return res.status(404).json({ error: 'Share not found' });
 
         // Check expiry
         if (share.expires_at && new Date(share.expires_at) < new Date()) {
-            return res.status(410).json({ error: 'Este enlace ha expirado' });
+            return res.status(410).json({ error: 'This link has expired' });
         }
 
         // Check download limit
         if (share.max_downloads > 0 && share.download_count >= share.max_downloads) {
-            return res.status(410).json({ error: 'Se ha alcanzado el límite de descargas' });
+            return res.status(410).json({ error: 'Download limit reached' });
         }
 
         const filePath = path.join(SHARE_DIR, `${req.params.token}.enc`);
@@ -471,9 +630,12 @@ app.get('/api/share/:token/download', async (req, res) => {
     }
 });
 
-// 11. List User's Shares
-app.get('/api/shares/:userId', async (req, res) => {
+// 11. List User's Shares (protected)
+app.get('/api/shares/:userId', requireAuth, async (req, res) => {
     try {
+        if (req.session.userId !== req.params.userId) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         const shares = await db.getSharesByUserId(req.params.userId);
         res.json(shares);
     } catch (error) {
@@ -483,11 +645,19 @@ app.get('/api/shares/:userId', async (req, res) => {
 });
 
 // 12. Delete Share
-app.delete('/api/share/:token', async (req, res) => {
+app.delete('/api/share/:token', requireAuth, async (req, res) => {
     try {
         const { token } = req.params;
+        if (!isValidUUID(token)) {
+            return res.status(400).json({ error: 'Invalid token format' });
+        }
+        // Verify ownership
+        const share = await db.getShareByToken(token);
+        if (share && share.user_id !== req.session.userId) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
         const filePath = path.join(SHARE_DIR, `${token}.enc`);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
         await db.deleteShare(token);
         res.json({ success: true });
     } catch (error) {

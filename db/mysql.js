@@ -18,17 +18,99 @@ try {
         connectionLimit: 10,
         queueLimit: 0
     });
+
+    // Initialize tables automatically
+    pool.getConnection().then(async (conn) => {
+        try {
+            await conn.query(`
+                CREATE TABLE IF NOT EXISTS users (
+                    id VARCHAR(36) PRIMARY KEY,
+                    username VARCHAR(255) UNIQUE NOT NULL,
+                    salt TEXT NOT NULL,
+                    public_key TEXT NOT NULL,
+                    encrypted_private_key TEXT NOT NULL,
+                    iv TEXT NOT NULL,
+                    server_auth_hash TEXT NOT NULL,
+                    public_link_enabled BOOLEAN DEFAULT TRUE,
+                    mailbox_quota BIGINT DEFAULT 524288000,
+                    last_login DATETIME
+                )
+            `);
+
+            await conn.query(`
+                CREATE TABLE IF NOT EXISTS packages (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL,
+                    sender_name VARCHAR(64),
+                    encrypted_session_key TEXT NOT NULL,
+                    encrypted_message TEXT,
+                    message_iv VARCHAR(255),
+                    status VARCHAR(20) DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            `);
+
+            await conn.query(`
+                CREATE TABLE IF NOT EXISTS package_files (
+                    id VARCHAR(36) PRIMARY KEY,
+                    package_id VARCHAR(36) NOT NULL,
+                    original_name TEXT NOT NULL,
+                    mime_type VARCHAR(255) NOT NULL,
+                    size BIGINT NOT NULL,
+                    FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+                )
+            `);
+
+            await conn.query(`
+                CREATE TABLE IF NOT EXISTS one_time_links (
+                    token VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL,
+                    is_used BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            `);
+
+            await conn.query(`
+                CREATE TABLE IF NOT EXISTS shares (
+                    token VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL,
+                    encrypted_file_key TEXT NOT NULL,
+                    key_iv VARCHAR(255) NOT NULL,
+                    salt TEXT NOT NULL,
+                    file_iv VARCHAR(255) NOT NULL,
+                    original_name TEXT NOT NULL,
+                    mime_type VARCHAR(255) NOT NULL,
+                    size BIGINT NOT NULL,
+                    encrypted_message TEXT,
+                    message_iv VARCHAR(255),
+                    max_downloads INT DEFAULT 0,
+                    download_count INT DEFAULT 0,
+                    expires_at DATETIME,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            `);
+            console.log("MySQL tables synchronized.");
+        } catch (err) {
+            console.error("Failed to initialize MySQL tables:", err);
+        } finally {
+            conn.release();
+        }
+    });
+
 } catch (e) {
     console.warn("MySQL driver 'mysql2' not found. MySQL support will not work until installed.");
 }
 
 module.exports = {
     // Structural placeholders - Implementation would map SQLite queries to MySQL syntax
-    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv) => {
+    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash) => {
         const id = uuidv4();
         await pool.execute(
-            'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [id, username, salt, publicKey, encryptedPrivateKey, iv, new Date()]
+            'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date()]
         );
         return id;
     },
@@ -45,6 +127,10 @@ module.exports = {
 
     updateLastLogin: async (userId) => {
         await pool.execute('UPDATE users SET last_login = ? WHERE id = ?', [new Date(), userId]);
+    },
+
+    updateServerAuthHash: async (userId, hash) => {
+        await pool.execute('UPDATE users SET server_auth_hash = ? WHERE id = ?', [hash, userId]);
     },
 
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv) => {
