@@ -1142,3 +1142,292 @@ input:checked + .slider:before {
   from { opacity: 0; transform: scale(0.98); }
   to { opacity: 1; transform: scale(1); }
 }
+
+/* --- Hamburger Button (hidden on desktop) --- */
+.btn-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 1.375rem;
+  cursor: pointer;
+  color: var(--text-color);
+  padding: 0.25rem;
+  line-height: 1;
+}
+
+/* --- Sidebar Overlay (hidden on desktop) --- */
+.sidebar-overlay {
+  display: none;
+}
+
+/* ========================================
+   RESPONSIVE BREAKPOINTS
+   ======================================== */
+
+/* -- Tablet & Small Laptops (≤ 768px) -- */
+@media (max-width: 768px) {
+
+  /* Hamburger visible */
+  .btn-hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Sidebar: slide-over drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 100;
+    box-shadow: none;
+    overflow-y: auto;
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+  }
+
+  /* Overlay */
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 99;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  .sidebar-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* App layout: full width */
+  .app-layout.active {
+    flex-direction: column;
+  }
+
+  .main-content {
+    width: 100%;
+  }
+
+  /* Nav title: row with hamburger */
+  .nav-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* Navbar tighter */
+  .top-navbar {
+    height: 60px;
+    padding: 0 1rem;
+  }
+
+  /* Content area */
+  .content-scroll {
+    padding: 1rem;
+  }
+
+  /* Packages: tighter */
+  .package-item {
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+
+  .package-header {
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .package-date {
+    font-size: 0.75rem;
+  }
+
+  /* Modal: near full-screen */
+  .modal-content {
+    width: 95%;
+    padding: 1.5rem;
+    border-radius: 16px;
+    max-height: 85vh;
+  }
+
+  .modal-header {
+    padding-bottom: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+
+  .modal-footer .btn {
+    width: 100%;
+  }
+
+  /* Login */
+  .auth-wrapper {
+    padding: 1rem;
+  }
+
+  .panel {
+    padding: 2rem 1.5rem;
+  }
+
+  .auth-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .auth-header h1 {
+    font-size: 1.625rem;
+  }
+
+  /* Drop page */
+  .terminal-container {
+    margin: 2rem auto;
+    padding: 0 1rem;
+  }
+
+  /* Alert banner */
+  .integrity-alert .integrity-alert-content {
+    padding: 1rem;
+  }
+}
+
+/* -- Phone (≤ 480px) -- */
+@media (max-width: 480px) {
+
+  /* Login */
+  .panel {
+    padding: 1.5rem 1.25rem;
+    border-radius: 14px;
+  }
+
+  .btn-group {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .btn-group .btn {
+    width: 100%;
+  }
+
+  .auth-header h1 {
+    font-size: 1.375rem;
+  }
+
+  .auth-header p {
+    font-size: 1rem;
+  }
+
+  /* Sidebar drawer narrower */
+  .sidebar {
+    width: 260px;
+  }
+
+  /* Packages */
+  .package-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+
+  .package-sender {
+    font-size: 0.875rem;
+  }
+
+  .package-subheader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+
+  /* Modal */
+  .modal-content {
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    padding: 1.25rem;
+  }
+
+  .modal-file-item {
+    padding: 0.625rem 0.75rem;
+    border-radius: 8px;
+  }
+
+  .modal-file-info {
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+  }
+
+  .file-name {
+    max-width: 140px;
+  }
+
+  .message-box {
+    padding: 1rem 1.25rem;
+  }
+
+  /* Meta info stacks */
+  .meta-info {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  /* Drop link */
+  .drop-link-small {
+    font-size: 0.75rem;
+    padding: 0.625rem;
+  }
+
+  /* Navbar */
+  .top-navbar {
+    height: 52px;
+    padding: 0 0.75rem;
+  }
+
+  .nav-actions .btn {
+    padding: 0.5rem 0.875rem;
+    font-size: 0.75rem;
+  }
+
+  /* Integrity badge */
+  .integrity-badge {
+    font-size: 0.6875rem;
+    padding: 0.25rem 0.625rem;
+  }
+
+  .integrity-hash-table {
+    padding: 0.5rem;
+  }
+}
+
+/* -- Small Phone (≤ 360px) -- */
+@media (max-width: 360px) {
+  .panel {
+    padding: 1.25rem 1rem;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+  }
+
+  .sidebar {
+    width: 240px;
+  }
+
+  .integrity-fp {
+    display: none;
+  }
+}

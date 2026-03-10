@@ -39,8 +39,10 @@
   </div>
 
   <div id="dashboard-panel" class="app-layout hidden">
+    <!-- Mobile Sidebar Overlay -->
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <h2>Shadow Drop</h2>
         <p id="system-status" class="status-offline">System: Offline</p>
@@ -85,6 +87,7 @@
     <div class="main-content">
       <header class="top-navbar">
         <div class="nav-title">
+          <button id="btn-menu" class="btn-hamburger" aria-label="Menu">☰</button>
           <h3>Inbox Vault</h3>
         </div>
         <div class="nav-actions">

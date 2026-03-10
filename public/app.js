@@ -615,3 +615,16 @@ window.addEventListener('keydown', (e) => {
         escTimer = setTimeout(() => { escCount = 0; }, 500);
     }
 });
+
+// Mobile Sidebar Toggle
+const btnMenu = document.getElementById('btn-menu');
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebar-overlay');
+
+function toggleSidebar() {
+    sidebar.classList.toggle('sidebar-open');
+    sidebarOverlay.classList.toggle('active');
+}
+
+if (btnMenu) btnMenu.addEventListener('click', toggleSidebar);
+if (sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
