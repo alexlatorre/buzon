@@ -87,14 +87,19 @@
 
     // Load share metadata
     async function loadMeta() {
-        if (!TOKEN) return showError('No se especificó un token de descarga.');
+        if (!TOKEN) return showError('No download token specified.');
 
         try {
             const res = await fetch(`/api/share/${TOKEN}/meta`);
             const data = await res.json();
 
             if (!res.ok) {
-                return showError(data.error || 'Enlace no disponible');
+                // Translate server errors
+                const errorMap = {
+                    'Este enlace ha expirado': 'This link has expired.',
+                    'Se ha alcanzado el límite de descargas': 'Download limit reached.'
+                };
+                return showError(errorMap[data.error] || data.error || 'Link unavailable');
             }
 
             shareMeta = data;
@@ -107,17 +112,17 @@
             let limitsHtml = '';
             if (data.maxDownloads > 0) {
                 const remaining = data.maxDownloads - data.downloadCount;
-                limitsHtml += `<span class="share-limit-item">📥 ${remaining} descarga${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}</span>`;
+                limitsHtml += `<span class="share-limit-item">📥 ${remaining} download${remaining !== 1 ? 's' : ''} remaining</span>`;
             }
             if (data.expiresAt) {
                 const expDate = new Date(data.expiresAt);
                 const now = new Date();
                 const hoursLeft = Math.max(0, Math.round((expDate - now) / 3600000));
                 if (hoursLeft <= 24) {
-                    limitsHtml += `<span class="share-limit-item">⏰ Expira en ${hoursLeft}h</span>`;
+                    limitsHtml += `<span class="share-limit-item">⏰ Expires in ${hoursLeft}h</span>`;
                 } else {
                     const daysLeft = Math.round(hoursLeft / 24);
-                    limitsHtml += `<span class="share-limit-item">⏰ Expira en ${daysLeft} día${daysLeft !== 1 ? 's' : ''}</span>`;
+                    limitsHtml += `<span class="share-limit-item">⏰ Expires in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}</span>`;
                 }
             }
             if (limitsHtml) limitsEl.innerHTML = limitsHtml;
@@ -125,18 +130,18 @@
             showForm();
         } catch (e) {
             console.error(e);
-            showError('Error de conexión al servidor.');
+            showError('Connection error.');
         }
     }
 
     // Decrypt and download
     async function handleDownload() {
         const password = passwordInput.value;
-        if (!password) return showMsg('Introduce la contraseña de desbloqueo.', 'error');
+        if (!password) return showMsg('Enter the unlock password.', 'error');
         if (!shareMeta) return;
 
         btnDownload.disabled = true;
-        btnDownload.textContent = '🔐 Derivando clave...';
+        btnDownload.textContent = '🔐 Deriving key...';
         showMsg('', 'info');
 
         try {
@@ -144,14 +149,14 @@
             const derivedKey = await deriveKey(password, shareMeta.salt);
 
             // 2. Decrypt the AES file key
-            btnDownload.textContent = '🔑 Descifrando clave...';
+            btnDownload.textContent = '🔑 Decrypting key...';
             let fileKeyRaw;
             try {
                 fileKeyRaw = await decryptAES(derivedKey, shareMeta.encryptedFileKey, shareMeta.keyIv);
             } catch (e) {
                 btnDownload.disabled = false;
-                btnDownload.textContent = '🔓 Descifrar y Descargar';
-                return showMsg('Contraseña incorrecta.', 'error');
+                btnDownload.textContent = '🔓 Decrypt & Download';
+                return showMsg('Wrong password.', 'error');
             }
 
             // 3. Import the file key
@@ -160,16 +165,16 @@
             );
 
             // 4. Download the encrypted file
-            btnDownload.textContent = '📥 Descargando fichero cifrado...';
+            btnDownload.textContent = '📥 Downloading encrypted file...';
             const fileRes = await fetch(`/api/share/${TOKEN}/download`);
             if (!fileRes.ok) {
                 const errData = await fileRes.json().catch(() => ({}));
-                throw new Error(errData.error || 'Error descargando fichero');
+                throw new Error(errData.error || 'Error downloading file');
             }
             const encryptedBlob = await fileRes.arrayBuffer();
 
             // 5. Decrypt the file
-            btnDownload.textContent = '🔓 Descifrando fichero...';
+            btnDownload.textContent = '🔓 Decrypting file...';
             const fileIv = base64ToBuffer(shareMeta.fileIv);
             const decryptedBuffer = await window.crypto.subtle.decrypt(
                 { name: 'AES-GCM', iv: fileIv },
@@ -209,9 +214,9 @@
 
         } catch (error) {
             console.error('Download error:', error);
-            showMsg(error.message || 'Error al descifrar el archivo.', 'error');
+            showMsg(error.message || 'Error decrypting the file.', 'error');
             btnDownload.disabled = false;
-            btnDownload.textContent = '🔓 Descifrar y Descargar';
+            btnDownload.textContent = '🔓 Decrypt & Download';
         }
     }
 

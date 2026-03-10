@@ -762,6 +762,30 @@ input:checked + .slider:before {
 }
 
 /* Share Feature Styles */
+.share-drop-area {
+  border: 2px dashed var(--border-color);
+  border-radius: 14px;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  background: var(--input-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.share-drop-area:hover,
+.share-drop-area.drop-active {
+  border-color: var(--accent-color);
+  background: #f0f7ff;
+  color: var(--accent-color);
+}
+
+.share-drop-area p {
+  margin: 0;
+  font-size: 0.875rem;
+  pointer-events: none;
+}
+
 .share-options {
   display: flex;
   gap: 1rem;

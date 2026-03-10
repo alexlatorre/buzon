@@ -1,112 +1,90 @@
-# Buzón Seguro (Personal DropBox)
+# Shadow Drop (Secure DropBox)
 
-Buzón Seguro es una plataforma de entrega de archivos y mensajes con arquitectura **Zero-Knowledge** (Conocimiento Cero). Está diseñado para permitir que cualquier persona te envíe información de manera ultra-segura sin que el servidor sea capaz de leer el contenido.
+Shadow Drop is a file and message delivery platform with **Zero-Knowledge** architecture. It allows anyone to send you information securely — the server is unable to read any content.
 
 https://gallifrey.sytes.net/
 
 ---
 
-## 🚀 Guía de Usuario
+## 🚀 User Guide
 
-### 1. Registro e Inicio de Sesión
-- Crea una cuenta eligiendo un **Nombre de Usuario** y una **Contraseña Maestra**.
-- El **medidor de fuerza** te indica en tiempo real la seguridad de tu contraseña (de rojo/muy débil a verde/muy fuerte).
-- **IMPORTANTE**: Tu contraseña maestra es la única llave para tus datos. Si la pierdes, nadie (ni el administrador del servidor) podrá recuperar tus archivos, ya que están cifrados con ella.
+### 1. Registration & Login
+- Create an account with a **Username** and **Master Password**.
+- The **strength meter** shows password security in real time (red/very weak → green/very strong).
+- **IMPORTANT**: Your master password is the only key to your data. If lost, nobody (not even the server admin) can recover your files.
 
-### 2. Recibir Archivos (Drop)
-- Una vez dentro, verás tu **Enlace Público**. Puedes compartirlo para recibir archivos.
-- También puedes generar **Enlaces de Un Solo Uso** en la barra lateral. Estos enlaces dejan de funcionar después del primer envío exitoso.
-- Puedes desactivar tu enlace público en cualquier momento desde la configuración en el Dashboard.
+### 2. Receiving Files (Drop)
+- After login, your **Public Link** is shown. Share it to receive files.
+- You can generate **One-Time Links** from the sidebar — they expire after the first successful submission.
+- You can disable the public link at any time from the Dashboard settings.
 
-### 3. Descarga y Lectura
-- Los paquetes recibidos aparecen en tu bandeja de entrada.
-- Al abrir un paquete, el sistema lo descifra en tu navegador.
-- Puedes descargar archivos individualmente o todos a la vez. Los archivos recuperarán su nombre y extensión original automáticamente.
+### 3. Download & Read
+- Packages appear in your inbox.
+- Opening a package decrypts it in your browser.
+- Download files individually or all at once — original names and extensions are restored automatically.
 
-### 4. Página de Seguridad
-- Desde la pantalla de login, accede a **"¿Cómo funciona? Conoce nuestra seguridad →"** para ver una explicación visual completa de la arquitectura criptográfica y el flujo de datos.
+### 4. Security Page
+- From the login screen, click **"How does it work? Learn about our security →"** for a visual explanation of the crypto architecture.
 
-### 5. Compartir Ficheros de Forma Segura
-- Desde el dashboard, pulsa **📤 Compartir Fichero** en el menú lateral.
-- Selecciona un archivo, establece una **contraseña de desbloqueo**, y opcionalmente añade un mensaje.
-- Configura la **expiración** (1h, 24h, 7 días, 30 días o sin caducidad) y el **límite de descargas**.
-- El navegador cifra el fichero con **AES-256-GCM** y protege la clave con **PBKDF2** derivada de la contraseña.
-- Se genera un enlace que puedes copiar y enviar al receptor.
-- El receptor abre el enlace, introduce la contraseña, y el fichero se descifra y descarga **exclusivamente en su navegador**.
-- El servidor nunca tiene acceso al contenido del fichero ni a la contraseña.
+### 5. Secure File Sharing
+- From the dashboard, click **📤 Share File** in the sidebar.
+- Select a file, set an **unlock password**, and optionally add a message.
+- Configure **expiration** (1h, 24h, 7 days, 30 days, or never) and **download limit**.
+- The browser encrypts the file with **AES-256-GCM** and protects the key with **PBKDF2** derived from the password.
+- A link is generated that you can copy and send to the recipient.
+- The recipient opens the link, enters the password, and the file is decrypted and downloaded **exclusively in their browser**.
+- The server never has access to the file contents or password.
 
 ---
 
-## 🛡️ Seguridad
+## 🛡️ Security
 
-### Arquitectura Zero-Knowledge
-A diferencia de otros servicios, Buzón Seguro utiliza **Cifrado de Extremo a Extremo (E2EE)** real. El servidor actúa únicamente como un "almacenamiento ciego" de bits cifrados.
+### Zero-Knowledge Architecture
+Unlike other services, Shadow Drop uses real **End-to-End Encryption (E2EE)**. The server acts only as "blind storage" for encrypted bits.
 
-#### ¿Dónde ocurre la magia?
-Todo el procesamiento criptográfico ocurre **exclusivamente en el Navegador del Usuario** utilizando la API `window.crypto` (Web Crypto API).
+#### Where does the magic happen?
+All cryptographic processing occurs **exclusively in the user's Browser** using the `window.crypto` (Web Crypto API).
 
-1.  **En el Registro/Login (Receptor)**:
-    - La contraseña maestra se utiliza para derivar una clave mediante **PBKDF2** (600.000 iteraciones, SHA-256).
-    - Tu clave privada RSA-4096 se genera y se cifra con esa clave derivada **antes** de salir de tu ordenador.
-    - El servidor solo guarda tu clave pública y tu clave privada envuelta (cifrada).
+1. **Registration/Login (Receiver)**: Master password derives a key via **PBKDF2** (600,000 iterations, SHA-256). RSA-4096 private key is encrypted with this derived key **before** leaving your machine.
+2. **Sending (Sender)**: Downloads your public key → generates a random **AES-GCM-256** session key → encrypts files and message with AES → encrypts AES key with your RSA public key (**RSA-OAEP**).
+3. **Receiving (Receiver)**: Browser downloads the encrypted block → private key (decrypted in RAM after login) decrypts the AES key → AES key decrypts the message and files.
 
-2.  **En el Envío (Remitente)**:
-    - El remitente descarga tu clave pública.
-    - Genera una clave simétrica **AES-GCM-256** aleatoria de un solo uso.
-    - Cifra los archivos y el mensaje con esa clave AES.
-    - Cifra la clave AES con tu clave pública RSA (**RSA-OAEP**).
-    - Envía los datos cifrados al servidor.
-
-3.  **En la Recepción (Receptor)**:
-    - Tu navegador descarga el bloque cifrado.
-    - Tu clave privada (descifrada en RAM tras el login) descifra la clave AES.
-    - La clave AES descifra el mensaje y los archivos.
-
-**Resultado**: El servidor nunca posee las llaves para ver tus archivos. Incluso si el servidor fuera comprometido, el atacante solo encontraría datos binarios ininteligibles.
+**Result**: The server never holds the keys to view your files.
 
 ### Content Security Policy (CSP)
-El servidor aplica cabeceras HTTP de seguridad estrictas:
-- **`script-src 'self'`** — solo se ejecutan scripts del propio servidor, bloqueando cualquier inyección XSS.
-- **`frame-ancestors 'none'`** — protección anti-clickjacking.
-- **`Referrer-Policy: no-referrer`** — no filtra información de navegación.
-- **`Cache-Control: no-store`** — no se cachean datos sensibles.
-- **`Permissions-Policy`** — deshabilita cámara, micrófono y geolocalización.
+Strict HTTP security headers: `script-src 'self'` (blocks XSS), `frame-ancestors 'none'` (anti-clickjacking), `no-referrer`, `no-store`, disabled camera/microphone/geolocation.
 
-### Verificación de Integridad de Ficheros
-Para mitigar el riesgo de que un atacante modifique los ficheros servidos:
+### File Integrity Verification
+1. **Server hashing**: On startup, SHA-256 hashes are computed for all critical public files and exposed at `/api/integrity`.
+2. **Client verification**: The browser independently computes hashes and compares them.
+3. **Change detection (localStorage)**: First-visit fingerprints are stored; any change triggers an integrity alert.
+4. **GitHub verification**: Links to source code on [GitHub](https://github.com/alexlatorre/buzon/tree/master/public) for external verification.
 
-1. **Hashing en el servidor**: Al arrancar, el servidor calcula el **SHA-256** de todos los ficheros públicos críticos (`app.js`, `crypto.js`, `integrity.js`, `style.css`, etc.) y los expone en `/api/integrity`.
-2. **Verificación independiente en el cliente**: El navegador descarga cada fichero, calcula su hash SHA-256 de forma independiente y lo compara con lo reportado por el servidor.
-3. **Detección de cambios (localStorage)**: La primera vez que visitas, se guardan las huellas digitales. En visitas posteriores, cualquier cambio dispara una **alerta de integridad**.
-4. **Verificación contra GitHub**: Los nombres de fichero en el panel de integridad son links directos al código fuente en [GitHub](https://github.com/alexlatorre/buzon/tree/master/public), permitiendo verificar manualmente que el código no ha sido manipulado.
+### Other Security Features
+- **Boss Key** (double ESC): Instant session logout with memory wipe.
+- **One-Time Links**: Auto-invalidated after first submission.
+- **Disable Public Link**: Cut external access at any time.
+- **Package Destruction**: Permanent server-side file deletion after reading.
+- **Password Strength Meter**: Real-time evaluation of length, character variety, and uniqueness.
+- **Responsive Design**: Mobile and tablet adaptive interface with sliding sidebar.
 
-> **Nota**: Un atacante que controle el servidor podría reescribir `integrity.js` para evadir esta verificación. Por eso se recomienda siempre comparar los hashes contra el repositorio público de GitHub como fuente de verdad externa.
+### 🔏 Trusted Hashes (SHA-256)
+Use this table as an external source of truth to verify that files served by your instance have not been tampered with.
 
-### Otras Características de Seguridad
-- **Boss Key** (doble ESC): Cierre instantáneo de sesión con limpieza de memoria.
-- **Enlaces de Un Solo Uso**: Se invalidan automáticamente después de un envío.
-- **Enlace Público desactivable**: Corta el acceso externo en cualquier momento.
-- **Destrucción de paquetes**: Eliminación permanente de archivos del servidor tras su lectura.
-- **Medidor de fuerza de contraseña**: Evalúa longitud, variedad de caracteres y unicidad en tiempo real.
-- **Diseño responsive**: Interfaz adaptada para móviles y tablets con sidebar deslizante y layouts optimizados.
-
-### 🔏 Hashes Confiables (SHA-256)
-Usa esta tabla como fuente de verdad externa para verificar que los ficheros servidos por tu instancia no han sido manipulados. Compara estos hashes con los que muestra el panel de integridad de la aplicación.
-
-| Fichero | SHA-256 |
+| File | SHA-256 |
 |---|---|
-| `app.js` | `a13d51ca0cfd2d28f356429ff3e5afdad9cc10c48125b253d9c169427f6c0bd4` |
+| `app.js` | `8d708cdca3371eacf0a5428dbae0fea2e35c21119d501fa0fc925450faab256e` |
 | `crypto.js` | `27eca691dc43573d5a7eaaebcb5fed60aa40e23dc797647ef3c6df690850441c` |
 | `integrity.js` | `b5d6bbfd4140cc7468c2947f43ea9bf188e28f28c9ca4b7021d4d3386973832d` |
-| `share.js` | `a4a478b9387495911b4a74e292ec8a522cae1e9fdcfb00ae15fde5094f5ac26a` |
+| `share.js` | `cc9a1a55b27713204604ed323f18682b62a4e3b0cfcef904317e4bc1ba571a91` |
 | `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |
-| `style.css` | `4b5e927ae82ad1e4ab5d2e3a20f96da1f24267ce9c694ca10f1eadba1a62dd8f` |
-| `index.html` | `d9f69dd08dc6cabea335ce9a096c7252298d0c75bd27523ee88cd97d29bb9a44` |
+| `style.css` | `d959dbcb0061ce42eb6e1afb714d964070d76c079b80f1540d1bd067b6a58335` |
+| `index.html` | `cba342f8059215eaba79dc6717f220e4f53a04f6d04c9e364c5d9eccd5138bec` |
 | `about.html` | `ec956c4e8d367185f405db8a13854ae9290f050f9204ff64299eea72df5888f3` |
 | `drop.html` | `212cfaadd493f015dff8d832cb01f30139dcecf7eff48adcd5233d4d29277888` |
-| `share.html` | `5911ceedff70cfe6cac45c2c33683e36fbeeeec1d816646ee3eb65d0ba3956de` |
+| `share.html` | `7e310e38af379693f2f6dbf50c4f00c3eecf2c7dfd6b6d1c3acd317716c9c531` |
 
-> **Verificación manual**: Abre la consola del navegador (F12) y ejecuta:
+> **Manual verification** (browser console F12):
 > ```javascript
 > fetch('/app.js').then(r=>r.text()).then(t=>crypto.subtle.digest('SHA-256',new TextEncoder().encode(t))).then(h=>console.log(Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('')))
 > ```
@@ -115,73 +93,93 @@ Usa esta tabla como fuente de verdad externa para verificar que los ficheros ser
 
 ## 🐳 Docker
 
-### Construir la imagen
+### Build
 ```bash
 docker build -t shadow-drop .
 ```
 
-### Ejecutar con volumen de datos persistente
+### Run with persistent data
 ```bash
-docker run -d -p 4000:4000 -v /ruta/datos:/app/data --name shadow-drop shadow-drop
-```
-
-### Con certificados SSL propios
-```bash
-docker run -d -p 4000:4000 \
-  -v /ruta/datos:/app/data \
-  -v /ruta/cert.pem:/app/cert.pem \
-  -v /ruta/key.pem:/app/key.pem \
+docker run -d -p 443:4000 \
+  -v ./data:/app/data \
+  -v ./fullchain.pem:/app/certs/fullchain.pem:ro \
+  -v ./privkey.pem:/app/certs/privkey.pem:ro \
   --name shadow-drop shadow-drop
 ```
 
-### Exportar / Importar imagen
+### Export / Import
 ```bash
-docker save -o shadow-drop.tar shadow-drop   # Exportar
-docker load -i shadow-drop.tar               # Importar
+docker save -o shadow-drop.tar shadow-drop   # Export
+docker load -i shadow-drop.tar               # Import
 ```
 
 ---
 
-## ⚙️ Instalación y Configuración
+## ⚙️ Setup & Configuration
 
-### Requisitos
-- **Node.js** (v18 o superior recomendado).
-- **HTTPS**: Es obligatorio para que el navegador permita el uso de las APIs criptográficas. Se incluyen certificados de prueba (`cert.pem`, `key.pem`).
+### Requirements
+- **Node.js** (v18+ recommended).
+- **HTTPS**: Required for browser crypto APIs. Mount your SSL certs or run behind a reverse proxy.
 
-### Configuración de Base de Datos
-El sistema soporta dos motores: **SQLite** (por defecto) y **MySQL**.
-Puedes configurarlo en `config.js`:
+### Database
+Supports **SQLite** (default) and **MySQL**. Configure in `config.js`:
 
 ```javascript
 module.exports = {
     db: {
-        engine: 'sqlite', // o 'mysql'
-        mysql: {
-            host: 'localhost',
-            user: 'root',
-            password: 'tu_password',
-            database: 'buzon'
-        }
+        engine: 'sqlite', // or 'mysql'
+        mysql: { host: 'localhost', user: 'root', password: 'your_password', database: 'buzon' }
     }
 };
 ```
 
-*Nota: Si usas MySQL, asegúrate de ejecutar `npm install mysql2`.*
+*Note: For MySQL, run `npm install mysql2`.*
 
-### Ejecución
-1. Instala dependencias: `npm install`.
-2. Inicia el servidor: `npm start` o `node server.js`.
-3. Accede a `https://localhost:4000`.
+### Run
+1. Install: `npm install`
+2. Start: `npm start` or `node server.js`
+3. Open `https://localhost:4000`
 
 ---
 
-## 📂 Estructura del Proyecto
-- `/public`: Frontend (Vanilla JS, HTML, CSS). Diseño premium inspirado en Apple.
-  - `integrity.js`: Sistema de verificación de integridad de ficheros.
-  - `crypto.js`: Utilidades criptográficas (PBKDF2, RSA-OAEP, AES-GCM).
-  - `about.html`: Página de información de seguridad.
-- `/db`: Drivers de base de datos (SQLite/MySQL).
-- `/data`: Almacenamiento local (Base de datos y archivos cifrados).
-- `server.js`: API Backend (Express) con CSP y cabeceras de seguridad.
-- `config.js`: Configuración global.
-- `Dockerfile`: Imagen Docker con Alpine y Node 20.
+## 📂 Project Structure
+- `/public`: Frontend (Vanilla JS, HTML, CSS). Apple-inspired premium design.
+  - `crypto.js`: Cryptographic utilities (PBKDF2, RSA-OAEP, AES-GCM).
+  - `integrity.js`: File integrity verification system.
+  - `share.js`: Secure file sharing (PBKDF2 + AES-GCM decryption).
+  - `about.html`: Security information page.
+  - `share.html`: Password-protected file download page.
+- `/db`: Database drivers (SQLite/MySQL).
+- `/data`: Local storage (database + encrypted files).
+- `server.js`: Backend API (Express) with CSP and security headers.
+- `config.js`: Global configuration.
+- `Dockerfile`: Alpine + Node 20 Docker image.
+
+---
+---
+
+# 🇪🇸 Español
+
+Shadow Drop es una plataforma de entrega de archivos y mensajes con arquitectura **Zero-Knowledge**. Permite que cualquier persona te envíe información de manera ultra-segura sin que el servidor pueda leer el contenido.
+
+## Guía Rápida
+1. **Registro**: Elige usuario y contraseña maestra. **Si la pierdes, nadie puede recuperar tus datos.**
+2. **Recibir archivos**: Comparte tu enlace público o genera enlaces de un solo uso.
+3. **Descargar**: Los paquetes se descifran en tu navegador. Descarga individual o masiva.
+4. **Compartir ficheros**: Pulsa 📤 Share File → selecciona archivo + contraseña → se cifra con AES-256 + PBKDF2 → comparte el enlace. El receptor introduce la contraseña para descifrar.
+
+## Seguridad
+- **E2EE real** con RSA-4096 + AES-256-GCM + PBKDF2 (600K iteraciones).
+- **CSP estricta**: Solo scripts propios, sin iframes, sin caché.
+- **Verificación de integridad**: Hashes SHA-256 verificados contra GitHub.
+- **Boss Key** (doble ESC), enlaces de un solo uso, destrucción de paquetes.
+- **Diseño responsive**: Optimizado para móviles y tablets.
+
+## Docker
+```bash
+docker run -d -p 443:4000 \
+  -v ./data:/app/data \
+  -v ./fullchain.pem:/app/certs/fullchain.pem:ro \
+  -v ./privkey.pem:/app/certs/privkey.pem:ro \
+  --name shadow-drop shadow-drop
+```
