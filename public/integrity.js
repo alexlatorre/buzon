@@ -108,13 +108,13 @@ const IntegrityCheck = {
 
         // Status header
         html += `<div class="integrity-status-row">
-            <span class="integrity-status-text">${details.statusText || 'Desconocido'}</span>
+            <span class="integrity-status-text">${details.statusText || 'Unknown'}</span>
         </div>`;
 
         // File hash table
         if (details.clientHashes) {
             html += '<div class="integrity-hash-table">';
-            html += '<div class="integrity-hash-header">SHA-256 Fingerprints <span class="integrity-hash-hint">(compara con el código fuente)</span></div>';
+            html += '<div class="integrity-hash-header">SHA-256 Fingerprints <span class="integrity-hash-hint">(compare with source code)</span></div>';
 
             for (const [file, hash] of Object.entries(details.clientHashes)) {
                 const isChanged = details.changedFiles && details.changedFiles.includes(file);
@@ -123,12 +123,12 @@ const IntegrityCheck = {
                 const statusClass = isChanged ? 'integrity-hash-changed' : 'integrity-hash-ok';
                 const githubFileUrl = `${this.GITHUB_REPO}/blob/${this.GITHUB_BRANCH}/public/${file}`;
 
-                const hashTitle = isChanged && storedHash ? `Actual: ${hash}\nAnterior: ${storedHash}` : hash;
+                const hashTitle = isChanged && storedHash ? `Current: ${hash}\nPrevious: ${storedHash}` : hash;
 
                 html += `<div class="integrity-hash-row ${statusClass}">
                     <div class="integrity-hash-file">
                         <span class="integrity-hash-status">${statusIcon}</span>
-                        <a href="${githubFileUrl}" target="_blank" rel="noopener" class="integrity-hash-name integrity-hash-link" title="Ver en GitHub">${file}</a>
+                        <a href="${githubFileUrl}" target="_blank" rel="noopener" class="integrity-hash-name integrity-hash-link" title="View on GitHub">${file}</a>
                     </div>
                     <div class="integrity-hash-value" title="${hashTitle}">${hash}</div>
                 </div>`;
@@ -138,17 +138,17 @@ const IntegrityCheck = {
 
         // GitHub verification link — always shown
         html += `<a href="${this.GITHUB_REPO}/tree/${this.GITHUB_BRANCH}/public" target="_blank" rel="noopener" class="integrity-github-link">
-            <span>📂</span> Verificar código fuente en GitHub
+            <span>📂</span> Verify source code on GitHub
         </a>`;
 
         // Timestamp
         if (stored) {
-            html += `<div class="integrity-timestamp">Huellas registradas: ${new Date(stored.timestamp).toLocaleString()}</div>`;
+            html += `<div class="integrity-timestamp">Fingerprints recorded: ${new Date(stored.timestamp).toLocaleString()}</div>`;
         }
 
         // Accept button (only on warning)
         if (details.changedFiles && details.changedFiles.length > 0) {
-            html += `<button class="btn secondary mini integrity-accept-btn" id="integrity-accept">Aceptar cambios como confiables</button>`;
+            html += `<button class="btn secondary mini integrity-accept-btn" id="integrity-accept">Accept changes as trusted</button>`;
         }
 
         html += '</div>';
@@ -177,30 +177,30 @@ const IntegrityCheck = {
 
         switch (status) {
             case 'ok':
-                this.indicator.innerHTML = `<span class="integrity-icon">🛡️</span><span class="integrity-label">Íntegro</span><code class="integrity-fp">${fingerprint}</code>`;
-                this.indicator.title = 'Integridad verificada — clic para ver hashes';
+                this.indicator.innerHTML = `<span class="integrity-icon">🛡️</span><span class="integrity-label">Intact</span><code class="integrity-fp">${fingerprint}</code>`;
+                this.indicator.title = 'Integrity verified — click to view hashes';
                 this.indicator.className = 'integrity-badge integrity-ok';
                 break;
             case 'first':
-                this.indicator.innerHTML = `<span class="integrity-icon">🛡️</span><span class="integrity-label">Registrado</span><code class="integrity-fp">${fingerprint}</code>`;
-                this.indicator.title = 'Primera verificación — huellas registradas';
+                this.indicator.innerHTML = `<span class="integrity-icon">🛡️</span><span class="integrity-label">Recorded</span><code class="integrity-fp">${fingerprint}</code>`;
+                this.indicator.title = 'First verification — fingerprints recorded';
                 this.indicator.className = 'integrity-badge integrity-first';
                 break;
             case 'warning':
-                this.indicator.innerHTML = `<span class="integrity-icon">⚠️</span><span class="integrity-label">Cambios detectados</span><code class="integrity-fp">${fingerprint}</code>`;
-                this.indicator.title = '¡Alerta! Los archivos han cambiado';
+                this.indicator.innerHTML = `<span class="integrity-icon">⚠️</span><span class="integrity-label">Changes Detected</span><code class="integrity-fp">${fingerprint}</code>`;
+                this.indicator.title = 'Alert! Files have changed';
                 this.indicator.className = 'integrity-badge integrity-warning';
                 this.showAlert(details);
                 break;
             case 'mismatch':
-                this.indicator.innerHTML = `<span class="integrity-icon">🚨</span><span class="integrity-label">¡Peligro!</span><code class="integrity-fp">${fingerprint}</code>`;
-                this.indicator.title = '¡PELIGRO! Hashes no coinciden';
+                this.indicator.innerHTML = `<span class="integrity-icon">🚨</span><span class="integrity-label">DANGER!</span><code class="integrity-fp">${fingerprint}</code>`;
+                this.indicator.title = 'DANGER! Hashes do not match';
                 this.indicator.className = 'integrity-badge integrity-danger';
                 this.showAlert(details);
                 break;
             case 'error':
-                this.indicator.innerHTML = '<span class="integrity-icon">❓</span><span class="integrity-label">Sin verificar</span>';
-                this.indicator.title = 'No se pudo verificar la integridad';
+                this.indicator.innerHTML = '<span class="integrity-icon">❓</span><span class="integrity-label">Unverified</span>';
+                this.indicator.title = 'Could not verify integrity';
                 this.indicator.className = 'integrity-badge integrity-unknown';
                 break;
         }
@@ -235,10 +235,10 @@ const IntegrityCheck = {
             <div class="integrity-alert-content">
                 <span class="integrity-alert-icon">⚠️</span>
                 <div class="integrity-alert-text">
-                    <strong>Alerta de Integridad</strong>
+                    <strong>Integrity Alert</strong>
                     <p>${details.message}</p>
-                    <p class="integrity-alert-files">${details.changedFiles ? 'Archivos afectados: ' + details.changedFiles.join(', ') : ''}</p>
-                    <a href="${githubUrl}" target="_blank" rel="noopener" class="integrity-alert-github">📂 Verificar en GitHub →</a>
+                    <p class="integrity-alert-files">${details.changedFiles ? 'Affected files: ' + details.changedFiles.join(', ') : ''}</p>
+                    <a href="${githubUrl}" target="_blank" rel="noopener" class="integrity-alert-github">📂 Verify on GitHub →</a>
                 </div>
                 <button class="integrity-alert-dismiss" id="integrity-alert-close">✕</button>
             </div>
@@ -260,7 +260,7 @@ const IntegrityCheck = {
             // 1. Fetch server-reported hashes
             const serverRes = await fetch('/api/integrity', { cache: 'no-store' });
             if (!serverRes.ok) {
-                this.setStatus('error', { statusText: 'Error al contactar el servidor' });
+                this.setStatus('error', { statusText: 'Error contacting server' });
                 return;
             }
             const serverData = await serverRes.json();
@@ -283,8 +283,8 @@ const IntegrityCheck = {
 
             if (serverMismatches.length > 0) {
                 this.setStatus('mismatch', {
-                    statusText: '🚨 PELIGRO — contenido no coincide con hashes del servidor',
-                    message: '¡Los archivos recibidos por tu navegador no coinciden con lo que el servidor dice haber enviado! Esto podría indicar que alguien está interceptando tu conexión.',
+                    statusText: '🚨 DANGER — content does not match server hashes',
+                    message: 'The files received by your browser do not match what the server claims to have sent! This could indicate someone is intercepting your connection.',
                     changedFiles: serverMismatches,
                     clientHashes
                 });
@@ -298,7 +298,7 @@ const IntegrityCheck = {
                 // First visit — register fingerprints
                 this.storeHashes(clientHashes);
                 this.setStatus('first', {
-                    statusText: '✓ Primera verificación — huellas digitales registradas',
+                    statusText: '✓ First verification — fingerprints recorded',
                     clientHashes
                 });
                 return;
@@ -313,8 +313,8 @@ const IntegrityCheck = {
 
             if (changedFiles.length > 0) {
                 this.setStatus('warning', {
-                    statusText: '⚠️ Archivos modificados desde la última visita',
-                    message: 'Los archivos del servidor han cambiado desde tu última visita. Esto puede ser una actualización legítima o un intento de inyección de código. Si no esperabas cambios, no introduzcas tu contraseña.',
+                    statusText: '⚠️ Files modified since last visit',
+                    message: 'Server files have changed since your last visit. This could be a legitimate update or a code injection attempt. If you did not expect changes, do not enter your password.',
                     changedFiles,
                     clientHashes
                 });
@@ -323,13 +323,13 @@ const IntegrityCheck = {
 
             // All OK
             this.setStatus('ok', {
-                statusText: '✓ Todos los archivos íntegros — sin cambios detectados',
+                statusText: '✓ All files intact — no changes detected',
                 clientHashes
             });
 
         } catch (e) {
             console.error('[Integrity] Verification failed:', e);
-            this.setStatus('error', { statusText: 'Error en la verificación' });
+            this.setStatus('error', { statusText: 'Verification error' });
         }
     },
 
@@ -338,7 +338,7 @@ const IntegrityCheck = {
         if (this.lastDetails && this.lastDetails.clientHashes) {
             this.storeHashes(this.lastDetails.clientHashes);
             this.setStatus('ok', {
-                statusText: '✓ Huellas actualizadas — archivos aceptados como confiables',
+                statusText: '✓ Fingerprints updated — files accepted as trusted',
                 clientHashes: this.lastDetails.clientHashes
             });
             const banner = document.getElementById('integrity-alert');

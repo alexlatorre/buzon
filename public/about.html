@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Shadow Drop | ¿Cómo Funciona?</title>
-  <meta name="description" content="Aprende cómo Shadow Drop protege tu información con arquitectura Zero-Knowledge y cifrado de extremo a extremo.">
+  <title>Shadow Drop | How It Works</title>
+  <meta name="description" content="Learn how Shadow Drop protects your information with Zero-Knowledge architecture and end-to-end encryption.">
   <link rel="stylesheet" href="style.css">
   <style>
     /* About Page Specific Styles */
@@ -514,43 +514,43 @@
     <!-- Navigation -->
     <nav class="about-nav">
       <a href="/" class="about-nav-brand">Shadow Drop</a>
-      <a href="/" class="about-nav-back">← Volver al Login</a>
+      <a href="/" class="about-nav-back">← Back to Login</a>
     </nav>
 
     <!-- Hero -->
     <section class="about-hero">
       <div class="about-badge">🔐 Zero-Knowledge Architecture</div>
-      <h1>¿Cómo funciona<br>Shadow Drop?</h1>
-      <p class="subtitle">Aprende cómo protegemos tu información con cifrado de extremo a extremo. El servidor nunca puede ver tus datos.</p>
+      <h1>How does<br>Shadow Drop work?</h1>
+      <p class="subtitle">Learn how we protect your information with end-to-end encryption. The server can never see your data.</p>
     </section>
 
     <!-- User Flow -->
     <section class="about-section">
       <div class="about-section-title">
-        <h2>Tu información, paso a paso</h2>
-        <p>Desde el registro hasta la descarga, todo está diseñado para que solo tú puedas leer tus archivos.</p>
+        <h2>Your information, step by step</h2>
+        <p>From registration to download, everything is designed so that only you can read your files.</p>
       </div>
 
       <div class="steps-grid">
         <div class="step-card">
-          <div class="step-number">Paso 1</div>
+          <div class="step-number">Step 1</div>
           <div class="step-icon blue">🔑</div>
-          <h3>Registro e Inicio de Sesión</h3>
-          <p>Crea una cuenta con un nombre de usuario y una <strong>Contraseña Maestra</strong>. Esta contraseña genera tus claves criptográficas directamente en tu navegador. El servidor <strong>nunca</strong> recibe tu contraseña ni tu clave privada en claro.</p>
+          <h3>Registration & Login</h3>
+          <p>Create an account with a username and a <strong>Master Password</strong>. This password generates your cryptographic keys directly in your browser. The server <strong>never</strong> receives your password or your private key in plaintext.</p>
         </div>
 
         <div class="step-card">
-          <div class="step-number">Paso 2</div>
+          <div class="step-number">Step 2</div>
           <div class="step-icon green">📤</div>
-          <h3>Alguien te Envía Archivos</h3>
-          <p>El remitente utiliza tu <strong>enlace público</strong> o un <strong>enlace de un solo uso</strong>. Su navegador cifra los archivos con tu clave pública antes de enviarlos. El servidor solo recibe datos cifrados.</p>
+          <h3>Someone Sends You Files</h3>
+          <p>The sender uses your <strong>public link</strong> or a <strong>one-time link</strong>. Their browser encrypts the files with your public key before sending. The server only receives encrypted data.</p>
         </div>
 
         <div class="step-card">
-          <div class="step-number">Paso 3</div>
+          <div class="step-number">Step 3</div>
           <div class="step-icon purple">📥</div>
-          <h3>Recibes y Descifras</h3>
-          <p>Los paquetes cifrados aparecen en tu bandeja de entrada. Al abrirlos, tu navegador los descifra en RAM usando tu clave privada. Puedes descargar archivos con su nombre y extensión original.</p>
+          <h3>Receive & Decrypt</h3>
+          <p>Encrypted packages appear in your inbox. When opened, your browser decrypts them in RAM using your private key. You can download files with their original name and extension.</p>
         </div>
       </div>
     </section>
@@ -558,37 +558,37 @@
     <!-- Flow Diagram -->
     <section class="about-section flow-section">
       <div class="about-section-title">
-        <h2>Flujo de datos en tiempo real</h2>
-        <p>El servidor actúa únicamente como almacenamiento ciego de bits cifrados.</p>
+        <h2>Real-time data flow</h2>
+        <p>The server acts only as blind storage for encrypted bits.</p>
       </div>
 
       <div class="flow-container">
         <div class="flow-node">
           <div class="flow-node-icon sender">👤</div>
-          <h4>Remitente</h4>
-          <p>Cifra archivos y mensaje con clave AES aleatoria. Cifra clave AES con tu clave pública RSA.</p>
+          <h4>Sender</h4>
+          <p>Encrypts files and message with a random AES key. Encrypts the AES key with your RSA public key.</p>
         </div>
 
         <div class="flow-arrow">
           →
-          <span class="flow-arrow-label">Datos cifrados</span>
+          <span class="flow-arrow-label">Encrypted data</span>
         </div>
 
         <div class="flow-node">
           <div class="flow-node-icon server">🗄️</div>
-          <h4>Servidor (Ciego)</h4>
-          <p>Almacena blobs binarios cifrados. No posee claves para descifrarlos. Zero-Knowledge.</p>
+          <h4>Server (Blind)</h4>
+          <p>Stores encrypted binary blobs. Has no keys to decrypt them. Zero-Knowledge.</p>
         </div>
 
         <div class="flow-arrow">
           →
-          <span class="flow-arrow-label">Blobs cifrados</span>
+          <span class="flow-arrow-label">Encrypted blobs</span>
         </div>
 
         <div class="flow-node">
           <div class="flow-node-icon receiver">🔓</div>
-          <h4>Receptor (Tú)</h4>
-          <p>Tu clave privada (en RAM) descifra la clave AES. La clave AES descifra los archivos.</p>
+          <h4>Receiver (You)</h4>
+          <p>Your private key (in RAM) decrypts the AES key. The AES key decrypts the files.</p>
         </div>
       </div>
     </section>
@@ -596,41 +596,41 @@
     <!-- Security Deep Dive -->
     <section class="about-section">
       <div class="about-section-title">
-        <h2>Criptografía bajo el capó</h2>
-        <p>Todo el procesamiento criptográfico ocurre exclusivamente en tu navegador usando <code>window.crypto</code> (Web Crypto API).</p>
+        <h2>Cryptography under the hood</h2>
+        <p>All cryptographic processing occurs exclusively in your browser using <code>window.crypto</code> (Web Crypto API).</p>
       </div>
 
       <div class="crypto-grid">
         <div class="crypto-card">
           <div class="crypto-card-header">
             <div class="crypto-card-icon">🔐</div>
-            <h3>PBKDF2 — Derivación de Clave</h3>
+            <h3>PBKDF2 — Key Derivation</h3>
           </div>
-          <p>Tu contraseña maestra se transforma en una clave AES-256 mediante <code>PBKDF2</code> con <strong>600.000 iteraciones</strong> y <code>SHA-256</code>. Un salt aleatorio de 16 bytes hace imposible los ataques con tablas precomputadas (rainbow tables).</p>
+          <p>Your master password is transformed into an AES-256 key via <code>PBKDF2</code> with <strong>600,000 iterations</strong> and <code>SHA-256</code>. A random 16-byte salt makes precomputed table attacks (rainbow tables) impossible.</p>
         </div>
 
         <div class="crypto-card">
           <div class="crypto-card-header">
             <div class="crypto-card-icon">🗝️</div>
-            <h3>RSA-OAEP — Claves Asimétricas</h3>
+            <h3>RSA-OAEP — Asymmetric Keys</h3>
           </div>
-          <p>Se genera un par de claves <code>RSA-OAEP</code> de <strong>4096 bits</strong> en tu navegador. La clave privada se cifra con tu clave maestra derivada <strong>antes</strong> de salir de tu ordenador. El servidor solo almacena la clave pública y la privada cifrada.</p>
+          <p>A <code>RSA-OAEP</code> <strong>4096-bit</strong> key pair is generated in your browser. The private key is encrypted with your derived master key <strong>before</strong> leaving your machine. The server only stores the public key and the encrypted private key.</p>
         </div>
 
         <div class="crypto-card">
           <div class="crypto-card-header">
             <div class="crypto-card-icon">⚡</div>
-            <h3>AES-GCM — Cifrado Simétrico</h3>
+            <h3>AES-GCM — Symmetric Encryption</h3>
           </div>
-          <p>Cada envío genera una clave de sesión <code>AES-GCM</code> de <strong>256 bits</strong> totalmente aleatoria. Los archivos y el mensaje se cifran con esta clave. La clave de sesión se cifra con la clave pública RSA del receptor.</p>
+          <p>Each submission generates a fully random <code>AES-GCM</code> <strong>256-bit</strong> session key. Files and message are encrypted with this key. The session key is encrypted with the receiver's RSA public key.</p>
         </div>
 
         <div class="crypto-card">
           <div class="crypto-card-header">
             <div class="crypto-card-icon">🌐</div>
-            <h3>Web Crypto API — Sin Dependencias</h3>
+            <h3>Web Crypto API — No Dependencies</h3>
           </div>
-          <p>Toda la criptografía utiliza la API nativa del navegador (<code>window.crypto.subtle</code>). Sin librerías externas. Sin transmisión de claves. Todo se ejecuta en el <strong>sandbox del navegador</strong> con rendimiento nativo.</p>
+          <p>All cryptography uses the browser's native API (<code>window.crypto.subtle</code>). No external libraries. No key transmission. Everything runs in the <strong>browser sandbox</strong> with native performance.</p>
         </div>
       </div>
     </section>
@@ -638,25 +638,25 @@
     <!-- What the server sees -->
     <section class="about-section">
       <div class="server-panel">
-        <h3>🛡️ ¿Qué ve el servidor?</h3>
+        <h3>🛡️ What does the server see?</h3>
 
         <div class="data-preview">
           <div class="data-item">
-            <div class="data-label">Clave Privada Almacenada</div>
-            <div class="data-value">aGVsbG8gd29ybGQ= [cifrada con AES-GCM, inaccesible sin tu contraseña]</div>
+            <div class="data-label">Stored Private Key</div>
+            <div class="data-value">aGVsbG8gd29ybGQ= [encrypted with AES-GCM, inaccessible without your password]</div>
           </div>
           <div class="data-item">
-            <div class="data-label">Mensaje Recibido</div>
-            <div class="data-value">xK3bN9pQ7m... [blob binario cifrado, sin posibilidad de lectura]</div>
+            <div class="data-label">Received Message</div>
+            <div class="data-value">xK3bN9pQ7m... [encrypted binary blob, unreadable]</div>
           </div>
           <div class="data-item">
-            <div class="data-label">Archivos Adjuntos</div>
-            <div class="data-value">0x4F 0x2A 0xBB... [bytes cifrados, nombres y tipos irreconocibles]</div>
+            <div class="data-label">Attached Files</div>
+            <div class="data-value">0x4F 0x2A 0xBB... [encrypted bytes, names and types unrecognizable]</div>
           </div>
         </div>
 
         <p class="conclusion">
-          <strong>Resultado:</strong> Incluso si el servidor fuera comprometido, el atacante solo encontraría datos binarios ininteligibles. Tu contraseña maestra es la única llave, y <strong>nunca sale de tu navegador</strong>.
+          <strong>Result:</strong> Even if the server were compromised, the attacker would only find unintelligible binary data. Your master password is the only key, and it <strong>never leaves your browser</strong>.
         </p>
       </div>
     </section>
@@ -664,44 +664,44 @@
     <!-- Additional Security Features -->
     <section class="about-section">
       <div class="about-section-title">
-        <h2>Características adicionales</h2>
-        <p>Funcionalidades diseñadas para maximizar tu privacidad y control.</p>
+        <h2>Additional features</h2>
+        <p>Features designed to maximize your privacy and control.</p>
       </div>
 
       <ul class="features-list">
         <li>
           <div class="feature-icon">🔗</div>
           <div class="feature-text">
-            <h4>Enlaces de Un Solo Uso</h4>
-            <p>Genera enlaces que se destruyen automáticamente tras el primer envío exitoso. Perfecto para recibir información sensible de una sola fuente.</p>
+            <h4>One-Time Links</h4>
+            <p>Generate links that are automatically destroyed after the first successful submission. Perfect for receiving sensitive information from a single source.</p>
           </div>
         </li>
         <li>
           <div class="feature-icon">🔒</div>
           <div class="feature-text">
-            <h4>Enlace Público Desactivable</h4>
-            <p>Puedes desactivar tu enlace público en cualquier momento desde el dashboard. Cuando está desactivado, nadie puede enviarte archivos a través de él.</p>
+            <h4>Disableable Public Link</h4>
+            <p>You can disable your public link at any time from the dashboard. When disabled, nobody can send you files through it.</p>
           </div>
         </li>
         <li>
           <div class="feature-icon">💣</div>
           <div class="feature-text">
-            <h4>Destrucción de Paquetes</h4>
-            <p>Elimina paquetes permanentemente del servidor después de leerlos. Los archivos cifrados se borran del disco sin posibilidad de recuperación.</p>
+            <h4>Package Destruction</h4>
+            <p>Permanently delete packages from the server after reading them. Encrypted files are wiped from disk with no possibility of recovery.</p>
           </div>
         </li>
         <li>
           <div class="feature-icon">⚡</div>
           <div class="feature-text">
-            <h4>Boss Key (Doble ESC)</h4>
-            <p>Pulsa Escape dos veces rápido para cerrar sesión instantáneamente. Tu clave privada se borra de la memoria RAM de forma inmediata.</p>
+            <h4>Boss Key (Double ESC)</h4>
+            <p>Press Escape twice quickly to instantly log out. Your private key is immediately erased from RAM.</p>
           </div>
         </li>
         <li>
           <div class="feature-icon">🔒</div>
           <div class="feature-text">
-            <h4>HTTPS Obligatorio</h4>
-            <p>El servidor requiere HTTPS para funcionar, garantizando que las APIs criptográficas del navegador estén disponibles y que la conexión esté cifrada en tránsito.</p>
+            <h4>Mandatory HTTPS</h4>
+            <p>The server requires HTTPS, ensuring browser crypto APIs are available and the connection is encrypted in transit.</p>
           </div>
         </li>
       </ul>
@@ -709,9 +709,9 @@
 
     <!-- Footer CTA -->
     <section class="about-footer">
-      <h2>¿Listo para empezar?</h2>
-      <p>Tu buzón seguro te espera. Crea una cuenta o inicia sesión.</p>
-      <a href="/" class="btn primary">Ir al Login →</a>
+      <h2>Ready to get started?</h2>
+      <p>Your secure mailbox awaits. Create an account or sign in.</p>
+      <a href="/" class="btn primary">Go to Login →</a>
     </section>
 
   </div>

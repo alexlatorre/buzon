@@ -75,12 +75,12 @@ Use this table as an external source of truth to verify that files served by you
 |---|---|
 | `app.js` | `8d708cdca3371eacf0a5428dbae0fea2e35c21119d501fa0fc925450faab256e` |
 | `crypto.js` | `27eca691dc43573d5a7eaaebcb5fed60aa40e23dc797647ef3c6df690850441c` |
-| `integrity.js` | `b5d6bbfd4140cc7468c2947f43ea9bf188e28f28c9ca4b7021d4d3386973832d` |
+| `integrity.js` | `37c58872820dbaba17132ade8e5e80ec645053c3678d4ffcfb64c42db16b7967` |
 | `share.js` | `cc9a1a55b27713204604ed323f18682b62a4e3b0cfcef904317e4bc1ba571a91` |
 | `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |
 | `style.css` | `d959dbcb0061ce42eb6e1afb714d964070d76c079b80f1540d1bd067b6a58335` |
-| `index.html` | `cba342f8059215eaba79dc6717f220e4f53a04f6d04c9e364c5d9eccd5138bec` |
-| `about.html` | `ec956c4e8d367185f405db8a13854ae9290f050f9204ff64299eea72df5888f3` |
+| `index.html` | `f145a0e3305e363d199f837d6d0af58c9d08d37e25a23f6b86d94ef4f473a9f6` |
+| `about.html` | `5b6ff72b65c24da11173a09c5401be7e575e69741754dc0412a560421aa10af2` |
 | `drop.html` | `212cfaadd493f015dff8d832cb01f30139dcecf7eff48adcd5233d4d29277888` |
 | `share.html` | `7e310e38af379693f2f6dbf50c4f00c3eecf2c7dfd6b6d1c3acd317716c9c531` |
 
