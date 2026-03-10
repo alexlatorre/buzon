@@ -87,7 +87,7 @@ Use this table as an external source of truth to verify that files served by you
 | `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |
 | `style.css` | `d959dbcb0061ce42eb6e1afb714d964070d76c079b80f1540d1bd067b6a58335` |
 | `index.html` | `f145a0e3305e363d199f837d6d0af58c9d08d37e25a23f6b86d94ef4f473a9f6` |
-| `about.html` | `5b6ff72b65c24da11173a09c5401be7e575e69741754dc0412a560421aa10af2` |
+| `about.html` | `40e3884215f5b5b429efe48887880d8b99cf17f65ae2e5676cfdc02a547cd4ef` |
 | `drop.html` | `212cfaadd493f015dff8d832cb01f30139dcecf7eff48adcd5233d4d29277888` |
 | `share.html` | `7e310e38af379693f2f6dbf50c4f00c3eecf2c7dfd6b6d1c3acd317716c9c531` |
 
