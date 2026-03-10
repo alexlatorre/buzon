@@ -75,7 +75,7 @@ Use this table as an external source of truth to verify that files served by you
 |---|---|
 | `app.js` | `8d708cdca3371eacf0a5428dbae0fea2e35c21119d501fa0fc925450faab256e` |
 | `crypto.js` | `27eca691dc43573d5a7eaaebcb5fed60aa40e23dc797647ef3c6df690850441c` |
-| `integrity.js` | `37c58872820dbaba17132ade8e5e80ec645053c3678d4ffcfb64c42db16b7967` |
+| `integrity.js` | `0a897a7a4869fb40a52b996b76ae52a60c1af548913ae2bce8e2e9cdd980e053` |
 | `share.js` | `cc9a1a55b27713204604ed323f18682b62a4e3b0cfcef904317e4bc1ba571a91` |
 | `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |
 | `style.css` | `d959dbcb0061ce42eb6e1afb714d964070d76c079b80f1540d1bd067b6a58335` |

@@ -4,7 +4,7 @@
 
 const IntegrityCheck = {
     STORAGE_KEY: 'shadowdrop_file_hashes',
-    CRITICAL_FILES: ['app.js', 'crypto.js', 'style.css'],
+    CRITICAL_FILES: ['app.js', 'crypto.js', 'integrity.js', 'share.js', 'drop.js', 'style.css', 'index.html', 'about.html', 'drop.html', 'share.html'],
     GITHUB_REPO: 'https://github.com/alexlatorre/buzon',
     GITHUB_BRANCH: 'master',
     indicator: null,
