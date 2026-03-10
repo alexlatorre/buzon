@@ -761,6 +761,116 @@ input:checked + .slider:before {
   opacity: 0.7;
 }
 
+/* Share Feature Styles */
+.share-options {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.select-styled {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--input-bg);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2386868b' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  cursor: pointer;
+}
+
+.select-styled:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  background-color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
+}
+
+.file-input-styled {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.file-input-styled:hover {
+  border-color: var(--accent-color);
+}
+
+.share-link-input {
+  font-size: 0.8125rem !important;
+  background: var(--input-bg) !important;
+  word-break: break-all;
+  cursor: text;
+}
+
+/* Share Download Page (share.html) */
+.share-file-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: var(--input-bg);
+  border-radius: 14px;
+  margin-bottom: 1.5rem;
+}
+
+.share-file-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.share-file-meta {
+  min-width: 0;
+}
+
+.share-filename {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-color);
+  word-break: break-all;
+}
+
+.share-filesize {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-top: 0.125rem;
+}
+
+.share-limits {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.share-limit-item {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  background: var(--input-bg);
+  padding: 0.375rem 0.75rem;
+  border-radius: 8px;
+}
+
+.share-error-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
 /* Password Strength Meter */
 .pw-strength {
   margin-top: 0.5rem;
@@ -1303,6 +1413,16 @@ input:checked + .slider:before {
   .integrity-alert .integrity-alert-content {
     padding: 1rem;
   }
+
+  /* Share modal */
+  .share-options {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .share-limits {
+    flex-wrap: wrap;
+  }
 }
 
 /* -- Phone (≤ 480px) -- */
@@ -1410,6 +1530,20 @@ input:checked + .slider:before {
 
   .integrity-hash-table {
     padding: 0.5rem;
+  }
+
+  /* Share page */
+  .share-file-info {
+    padding: 1rem;
+  }
+
+  .share-filename {
+    font-size: 0.875rem;
+  }
+
+  .share-limits {
+    flex-direction: column;
+    gap: 0.5rem;
   }
 }
 

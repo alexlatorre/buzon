@@ -51,6 +51,7 @@
         <div class="nav-group">
           <p class="nav-label">Main</p>
           <a href="#" class="nav-item active">Inbox</a>
+          <button id="btn-open-share" class="btn primary full-width mini" style="margin-top:0.5rem;">📤 Compartir Fichero</button>
         </div>
         <div class="nav-group drop-link-group">
           <p class="nav-label">Your Public Drop Link</p>
@@ -126,6 +127,73 @@
       <div class="modal-footer">
         <button id="btn-download-all" class="btn primary">Decrypt & Download</button>
         <button id="btn-destroy" class="btn danger">Destroy Package</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Share Modal -->
+  <div id="share-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📤 Compartir Fichero</h3>
+        <button id="btn-close-share" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Step 1: Form -->
+        <div id="share-step-form">
+          <div class="form-group">
+            <label for="share-file">Archivo</label>
+            <input type="file" id="share-file" class="file-input-styled">
+          </div>
+          <div class="form-group">
+            <label for="share-pw">Contraseña de desbloqueo</label>
+            <input type="password" id="share-pw" placeholder="El receptor necesitará esta contraseña" autocomplete="off">
+            <div id="share-pw-strength" class="pw-strength hidden">
+              <div class="pw-strength-bar"><div id="share-pw-fill" class="pw-strength-fill"></div></div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="share-note">Mensaje (opcional)</label>
+            <textarea id="share-note" rows="2" placeholder="Nota para el receptor..."></textarea>
+          </div>
+          <div class="share-options">
+            <div class="form-group" style="flex:1;">
+              <label for="share-expiry">Expiración</label>
+              <select id="share-expiry" class="select-styled">
+                <option value="0">Sin caducidad</option>
+                <option value="1">1 hora</option>
+                <option value="24" selected>24 horas</option>
+                <option value="168">7 días</option>
+                <option value="720">30 días</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label for="share-max-dl">Máx. descargas</label>
+              <select id="share-max-dl" class="select-styled">
+                <option value="0">Ilimitadas</option>
+                <option value="1" selected>1 descarga</option>
+                <option value="5">5 descargas</option>
+                <option value="10">10 descargas</option>
+              </select>
+            </div>
+          </div>
+          <div id="share-upload-msg" class="msg"></div>
+        </div>
+        <!-- Step 2: Result -->
+        <div id="share-step-result" class="hidden">
+          <div style="text-align:center; margin-bottom:1.5rem;">
+            <div style="font-size:2.5rem;">✅</div>
+            <h3 style="margin-top:0.5rem;">Fichero compartido</h3>
+          </div>
+          <div class="form-group">
+            <label>Enlace de descarga</label>
+            <input type="text" id="share-result-link" readonly class="share-link-input">
+          </div>
+          <button id="btn-copy-share" class="btn secondary full-width">📋 Copiar enlace</button>
+        </div>
+      </div>
+      <div class="modal-footer" id="share-footer-form">
+        <button id="btn-share-upload" class="btn primary">🔐 Cifrar y Compartir</button>
       </div>
     </div>
   </div>

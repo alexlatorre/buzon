@@ -628,3 +628,181 @@ function toggleSidebar() {
 
 if (btnMenu) btnMenu.addEventListener('click', toggleSidebar);
 if (sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
+
+// ========================
+// SECURE FILE SHARING
+// ========================
+
+const shareModal = document.getElementById('share-modal');
+const btnOpenShare = document.getElementById('btn-open-share');
+const btnCloseShare = document.getElementById('btn-close-share');
+const btnShareUpload = document.getElementById('btn-share-upload');
+const btnCopyShare = document.getElementById('btn-copy-share');
+const shareStepForm = document.getElementById('share-step-form');
+const shareStepResult = document.getElementById('share-step-result');
+const shareFooterForm = document.getElementById('share-footer-form');
+const shareUploadMsg = document.getElementById('share-upload-msg');
+const shareResultLink = document.getElementById('share-result-link');
+const sharePwInput = document.getElementById('share-pw');
+const sharePwStrength = document.getElementById('share-pw-strength');
+const sharePwFill = document.getElementById('share-pw-fill');
+
+function openShareModal() {
+    shareModal.classList.remove('hidden');
+    shareStepForm.classList.remove('hidden');
+    shareStepResult.classList.add('hidden');
+    shareFooterForm.classList.remove('hidden');
+    shareUploadMsg.textContent = '';
+    shareUploadMsg.className = 'msg';
+    document.getElementById('share-file').value = '';
+    sharePwInput.value = '';
+    document.getElementById('share-note').value = '';
+    sharePwStrength.classList.add('hidden');
+    btnShareUpload.disabled = false;
+    btnShareUpload.textContent = '🔐 Cifrar y Compartir';
+    // Close sidebar on mobile
+    if (sidebar && sidebar.classList.contains('sidebar-open')) toggleSidebar();
+}
+
+function closeShareModal() {
+    shareModal.classList.add('hidden');
+}
+
+// Share password strength meter
+if (sharePwInput) {
+    sharePwInput.addEventListener('input', function () {
+        const val = this.value;
+        if (!val) { sharePwStrength.classList.add('hidden'); return; }
+        sharePwStrength.classList.remove('hidden');
+        const result = evaluatePassword(val);
+        const colors = ['pw-very-weak', 'pw-weak', 'pw-fair', 'pw-strong', 'pw-very-strong'];
+        const widths = [15, 35, 55, 75, 100];
+        sharePwFill.style.width = widths[result.level] + '%';
+        sharePwFill.className = 'pw-strength-fill ' + colors[result.level];
+    });
+}
+
+if (btnOpenShare) btnOpenShare.addEventListener('click', openShareModal);
+if (btnCloseShare) btnCloseShare.addEventListener('click', closeShareModal);
+
+// Close share modal on overlay click
+if (shareModal) {
+    shareModal.addEventListener('click', function (e) {
+        if (e.target === shareModal) closeShareModal();
+    });
+}
+
+// Share upload flow
+async function handleShareUpload() {
+    const fileInput = document.getElementById('share-file');
+    const password = sharePwInput.value;
+    const note = document.getElementById('share-note').value.trim();
+    const expiresIn = document.getElementById('share-expiry').value;
+    const maxDownloads = document.getElementById('share-max-dl').value;
+
+    if (!fileInput.files || !fileInput.files.length) {
+        shareUploadMsg.textContent = 'Selecciona un archivo.';
+        shareUploadMsg.className = 'msg error';
+        return;
+    }
+    if (!password || password.length < 4) {
+        shareUploadMsg.textContent = 'La contraseña debe tener al menos 4 caracteres.';
+        shareUploadMsg.className = 'msg error';
+        return;
+    }
+
+    const file = fileInput.files[0];
+    btnShareUpload.disabled = true;
+    shareUploadMsg.className = 'msg info';
+
+    try {
+        // 1. Read file
+        btnShareUpload.textContent = '📖 Leyendo archivo...';
+        const fileBuffer = await file.arrayBuffer();
+
+        // 2. Generate AES key and encrypt file
+        btnShareUpload.textContent = '🔒 Cifrando archivo...';
+        const aesKey = await CryptoUtils.generateSessionKey();
+        const fileIv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encryptedFile = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: fileIv },
+            aesKey,
+            fileBuffer
+        );
+
+        // 3. Derive key from password
+        btnShareUpload.textContent = '🔑 Derivando clave...';
+        const salt = CryptoUtils.generateSalt(16);
+        const saltBuffer = CryptoUtils.base64ToBuffer(salt);
+        const derivedKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
+
+        // 4. Export and wrap AES key with derived key
+        const rawKey = await window.crypto.subtle.exportKey('raw', aesKey);
+        const keyIv = window.crypto.getRandomValues(new Uint8Array(12));
+        const wrappedKey = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: keyIv },
+            derivedKey,
+            rawKey
+        );
+
+        // 5. Encrypt message if present
+        let encryptedMessage = null;
+        let messageIv = null;
+        if (note) {
+            const enc = new TextEncoder();
+            const msgResult = await CryptoUtils.encryptSymmetric(derivedKey, enc.encode(note));
+            encryptedMessage = msgResult.ciphertext;
+            messageIv = msgResult.iv;
+        }
+
+        // 6. Build FormData and upload
+        btnShareUpload.textContent = '📤 Subiendo...';
+        const encryptedBlob = new Blob([encryptedFile], { type: 'application/octet-stream' });
+        const formData = new FormData();
+        formData.append('file', encryptedBlob, 'encrypted.bin');
+        formData.append('encryptedFileKey', CryptoUtils.bufferToBase64(wrappedKey));
+        formData.append('keyIv', CryptoUtils.bufferToBase64(keyIv));
+        formData.append('salt', salt);
+        formData.append('fileIv', CryptoUtils.bufferToBase64(fileIv));
+        formData.append('originalName', file.name);
+        formData.append('mimeType', file.type || 'application/octet-stream');
+        formData.append('maxDownloads', maxDownloads);
+        formData.append('expiresIn', expiresIn);
+        if (encryptedMessage) {
+            formData.append('encryptedMessage', encryptedMessage);
+            formData.append('messageIv', messageIv);
+        }
+
+        const res = await fetch(`/api/share/${sessionState.uuid}`, { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+        // 7. Show result
+        const shareUrl = `${window.location.origin}/share.html?token=${data.token}`;
+        shareResultLink.value = shareUrl;
+        shareStepForm.classList.add('hidden');
+        shareFooterForm.classList.add('hidden');
+        shareStepResult.classList.remove('hidden');
+
+    } catch (error) {
+        console.error('Share upload error:', error);
+        shareUploadMsg.textContent = error.message || 'Error al cifrar/subir el archivo.';
+        shareUploadMsg.className = 'msg error';
+        btnShareUpload.disabled = false;
+        btnShareUpload.textContent = '🔐 Cifrar y Compartir';
+    }
+}
+
+if (btnShareUpload) btnShareUpload.addEventListener('click', handleShareUpload);
+
+// Copy share link
+if (btnCopyShare) {
+    btnCopyShare.addEventListener('click', function () {
+        shareResultLink.select();
+        navigator.clipboard.writeText(shareResultLink.value).then(() => {
+            btnCopyShare.textContent = '✅ Copiado!';
+            setTimeout(() => { btnCopyShare.textContent = '📋 Copiar enlace'; }, 2000);
+        });
+    });
+}

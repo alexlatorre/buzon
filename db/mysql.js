@@ -127,5 +127,36 @@ module.exports = {
 
     deleteOneTimeLink: async (token, userId) => {
         await pool.execute('DELETE FROM one_time_links WHERE token = ? AND user_id = ?', [token, userId]);
+    },
+
+    // --- Shares ---
+    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt) => {
+        await pool.execute(
+            `INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null]
+        );
+        return token;
+    },
+
+    getShareByToken: async (token) => {
+        const [rows] = await pool.execute('SELECT * FROM shares WHERE token = ?', [token]);
+        return rows[0];
+    },
+
+    incrementShareDownloads: async (token) => {
+        await pool.execute('UPDATE shares SET download_count = download_count + 1 WHERE token = ?', [token]);
+    },
+
+    getSharesByUserId: async (userId) => {
+        const [rows] = await pool.execute(
+            'SELECT token, original_name, mime_type, size, max_downloads, download_count, expires_at, created_at FROM shares WHERE user_id = ? ORDER BY created_at DESC',
+            [userId]
+        );
+        return rows;
+    },
+
+    deleteShare: async (token) => {
+        await pool.execute('DELETE FROM shares WHERE token = ?', [token]);
     }
 };

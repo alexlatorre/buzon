@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow Drop | Secure Download</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="auth-wrapper active">
+    <div class="login-container">
+      <header class="auth-header">
+        <h1>Shadow Drop</h1>
+        <p>Descarga Segura</p>
+      </header>
+
+      <!-- Loading State -->
+      <div id="share-loading" class="panel" style="text-align:center;">
+        <p class="text-muted">Cargando información del enlace...</p>
+      </div>
+
+      <!-- Error State -->
+      <div id="share-error" class="panel hidden">
+        <div class="share-error-icon" style="text-align:center; font-size:3rem; margin-bottom:1rem;">🚫</div>
+        <h2 style="text-align:center; margin-bottom:0.5rem;">Enlace no disponible</h2>
+        <p id="share-error-msg" class="text-muted" style="text-align:center;"></p>
+      </div>
+
+      <!-- Download Form -->
+      <div id="share-form" class="panel hidden">
+        <div class="share-file-info">
+          <div class="share-file-icon">📄</div>
+          <div class="share-file-meta">
+            <div id="share-filename" class="share-filename"></div>
+            <div id="share-filesize" class="share-filesize"></div>
+          </div>
+        </div>
+
+        <div id="share-message-box" class="message-box hidden">
+          <h4>Mensaje del remitente</h4>
+          <p id="share-message"></p>
+        </div>
+
+        <div id="share-limits" class="share-limits"></div>
+
+        <div class="form-group">
+          <label for="share-password">Contraseña de desbloqueo</label>
+          <input type="password" id="share-password" placeholder="Introduce la contraseña" autocomplete="off">
+        </div>
+
+        <button id="btn-share-download" class="btn primary full-width">🔓 Descifrar y Descargar</button>
+        <div id="share-msg" class="msg"></div>
+      </div>
+
+      <!-- Success State -->
+      <div id="share-success" class="panel hidden" style="text-align:center;">
+        <div style="font-size:3rem; margin-bottom:1rem;">✅</div>
+        <h2 style="margin-bottom:0.5rem;">Descarga completada</h2>
+        <p class="text-muted">El archivo ha sido descifrado y descargado correctamente.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="crypto.js"></script>
+  <script src="share.js"></script>
+</body>
+</html>

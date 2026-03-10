@@ -26,6 +26,15 @@ https://gallifrey.sytes.net/
 ### 4. Página de Seguridad
 - Desde la pantalla de login, accede a **"¿Cómo funciona? Conoce nuestra seguridad →"** para ver una explicación visual completa de la arquitectura criptográfica y el flujo de datos.
 
+### 5. Compartir Ficheros de Forma Segura
+- Desde el dashboard, pulsa **📤 Compartir Fichero** en el menú lateral.
+- Selecciona un archivo, establece una **contraseña de desbloqueo**, y opcionalmente añade un mensaje.
+- Configura la **expiración** (1h, 24h, 7 días, 30 días o sin caducidad) y el **límite de descargas**.
+- El navegador cifra el fichero con **AES-256-GCM** y protege la clave con **PBKDF2** derivada de la contraseña.
+- Se genera un enlace que puedes copiar y enviar al receptor.
+- El receptor abre el enlace, introduce la contraseña, y el fichero se descifra y descarga **exclusivamente en su navegador**.
+- El servidor nunca tiene acceso al contenido del fichero ni a la contraseña.
+
 ---
 
 ## 🛡️ Seguridad
@@ -86,14 +95,16 @@ Usa esta tabla como fuente de verdad externa para verificar que los ficheros ser
 
 | Fichero | SHA-256 |
 |---|---|
-| `app.js` | `860cdf4a8ba7c1417fbde389156df73424fe553875b74ce36e44a2b4988d719f` |
+| `app.js` | `a13d51ca0cfd2d28f356429ff3e5afdad9cc10c48125b253d9c169427f6c0bd4` |
 | `crypto.js` | `27eca691dc43573d5a7eaaebcb5fed60aa40e23dc797647ef3c6df690850441c` |
 | `integrity.js` | `b5d6bbfd4140cc7468c2947f43ea9bf188e28f28c9ca4b7021d4d3386973832d` |
+| `share.js` | `a4a478b9387495911b4a74e292ec8a522cae1e9fdcfb00ae15fde5094f5ac26a` |
 | `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |
-| `style.css` | `0dd73d33993211bbb3e79e9d09242f37d1bdbe0084dc43f8fc91a0e0e6b25170` |
-| `index.html` | `cc310c5850290fb265fa5db69193e093571732ba62bb6a20c0d079b1dd09408b` |
-| `drop.html` | `212cfaadd493f015dff8d832cb01f30139dcecf7eff48adcd5233d4d29277888` |
+| `style.css` | `4b5e927ae82ad1e4ab5d2e3a20f96da1f24267ce9c694ca10f1eadba1a62dd8f` |
+| `index.html` | `d9f69dd08dc6cabea335ce9a096c7252298d0c75bd27523ee88cd97d29bb9a44` |
 | `about.html` | `ec956c4e8d367185f405db8a13854ae9290f050f9204ff64299eea72df5888f3` |
+| `drop.html` | `212cfaadd493f015dff8d832cb01f30139dcecf7eff48adcd5233d4d29277888` |
+| `share.html` | `5911ceedff70cfe6cac45c2c33683e36fbeeeec1d816646ee3eb65d0ba3956de` |
 
 > **Verificación manual**: Abre la consola del navegador (F12) y ejecuta:
 > ```javascript

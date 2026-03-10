@@ -9,7 +9,7 @@ const db = require('./db');
 
 // --- File Integrity System ---
 // Compute SHA-256 hashes of all critical public files at startup
-const INTEGRITY_FILES = ['app.js', 'crypto.js', 'drop.js', 'integrity.js', 'index.html', 'about.html', 'drop.html', 'style.css'];
+const INTEGRITY_FILES = ['app.js', 'crypto.js', 'drop.js', 'integrity.js', 'share.js', 'index.html', 'about.html', 'drop.html', 'share.html', 'style.css'];
 const fileHashes = {};
 
 function computeFileHashes() {
@@ -344,6 +344,155 @@ app.delete('/api/package/:packageId', async (req, res) => {
     } catch (error) {
         console.error('Delete error:', error);
         res.status(500).json({ error: 'Server error deleting package' });
+    }
+});
+
+// --- Secure File Sharing ---
+const SHARE_DIR = path.join(__dirname, 'data', 'shares');
+if (!fs.existsSync(SHARE_DIR)) {
+    fs.mkdirSync(SHARE_DIR, { recursive: true });
+}
+
+const shareStorage = multer.diskStorage({
+    destination(req, file, cb) { cb(null, SHARE_DIR); },
+    filename(req, file, cb) {
+        const uniqueName = crypto.randomUUID() + '.enc';
+        cb(null, uniqueName);
+    }
+});
+const shareUpload = multer({ storage: shareStorage });
+
+// 8. Create Share (Upload encrypted file)
+app.post('/api/share/:userId', shareUpload.single('file'), async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv, maxDownloads, expiresIn } = req.body;
+
+        if (!req.file || !encryptedFileKey || !keyIv || !salt || !fileIv || !originalName) {
+            if (req.file) fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        const token = crypto.randomUUID();
+
+        // Calculate expiry date
+        let expiresAt = null;
+        if (expiresIn && expiresIn !== '0') {
+            const hours = parseInt(expiresIn);
+            if (hours > 0) {
+                expiresAt = new Date(Date.now() + hours * 3600000).toISOString();
+            }
+        }
+
+        // Rename file to token-based name
+        const finalPath = path.join(SHARE_DIR, `${token}.enc`);
+        fs.renameSync(req.file.path, finalPath);
+
+        await db.createShare(
+            userId, token, encryptedFileKey, keyIv, salt, fileIv,
+            originalName, mimeType || 'application/octet-stream', req.file.size,
+            encryptedMessage || null, messageIv || null,
+            parseInt(maxDownloads) || 0, expiresAt
+        );
+
+        res.json({ success: true, token });
+    } catch (error) {
+        console.error('Share create error:', error);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: 'Server error creating share' });
+    }
+});
+
+// 9. Get Share Metadata (public — no auth)
+app.get('/api/share/:token/meta', async (req, res) => {
+    try {
+        const share = await db.getShareByToken(req.params.token);
+        if (!share) return res.status(404).json({ error: 'Share not found' });
+
+        // Check expiry
+        if (share.expires_at && new Date(share.expires_at) < new Date()) {
+            return res.status(410).json({ error: 'Este enlace ha expirado' });
+        }
+
+        // Check download limit
+        if (share.max_downloads > 0 && share.download_count >= share.max_downloads) {
+            return res.status(410).json({ error: 'Se ha alcanzado el límite de descargas' });
+        }
+
+        res.json({
+            originalName: share.original_name,
+            mimeType: share.mime_type,
+            size: share.size,
+            salt: share.salt,
+            keyIv: share.key_iv,
+            encryptedFileKey: share.encrypted_file_key,
+            fileIv: share.file_iv,
+            encryptedMessage: share.encrypted_message,
+            messageIv: share.message_iv,
+            maxDownloads: share.max_downloads,
+            downloadCount: share.download_count,
+            expiresAt: share.expires_at,
+            createdAt: share.created_at
+        });
+    } catch (error) {
+        console.error('Share meta error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// 10. Download Encrypted Share File
+app.get('/api/share/:token/download', async (req, res) => {
+    try {
+        const share = await db.getShareByToken(req.params.token);
+        if (!share) return res.status(404).json({ error: 'Share not found' });
+
+        // Check expiry
+        if (share.expires_at && new Date(share.expires_at) < new Date()) {
+            return res.status(410).json({ error: 'Este enlace ha expirado' });
+        }
+
+        // Check download limit
+        if (share.max_downloads > 0 && share.download_count >= share.max_downloads) {
+            return res.status(410).json({ error: 'Se ha alcanzado el límite de descargas' });
+        }
+
+        const filePath = path.join(SHARE_DIR, `${req.params.token}.enc`);
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'File not found on disk' });
+        }
+
+        // Increment download count
+        await db.incrementShareDownloads(req.params.token);
+
+        res.sendFile(filePath);
+    } catch (error) {
+        console.error('Share download error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// 11. List User's Shares
+app.get('/api/shares/:userId', async (req, res) => {
+    try {
+        const shares = await db.getSharesByUserId(req.params.userId);
+        res.json(shares);
+    } catch (error) {
+        console.error('List shares error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// 12. Delete Share
+app.delete('/api/share/:token', async (req, res) => {
+    try {
+        const { token } = req.params;
+        const filePath = path.join(SHARE_DIR, `${token}.enc`);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        await db.deleteShare(token);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete share error:', error);
+        res.status(500).json({ error: 'Server error deleting share' });
     }
 });
 

@@ -48,6 +48,25 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS shares (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    encrypted_file_key TEXT NOT NULL,
+    key_iv TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    file_iv TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    encrypted_message TEXT,
+    message_iv TEXT,
+    max_downloads INTEGER DEFAULT 0,
+    download_count INTEGER DEFAULT 0,
+    expires_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
 `);
 
 // Dynamic migrations
@@ -159,5 +178,30 @@ module.exports = {
 
     deleteOneTimeLink: async (token, userId) => {
         db.prepare('DELETE FROM one_time_links WHERE token = ? AND user_id = ?').run(token, userId);
+    },
+
+    // --- Shares ---
+    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt) => {
+        db.prepare(`
+            INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null);
+        return token;
+    },
+
+    getShareByToken: async (token) => {
+        return db.prepare('SELECT * FROM shares WHERE token = ?').get(token);
+    },
+
+    incrementShareDownloads: async (token) => {
+        db.prepare('UPDATE shares SET download_count = download_count + 1 WHERE token = ?').run(token);
+    },
+
+    getSharesByUserId: async (userId) => {
+        return db.prepare('SELECT token, original_name, mime_type, size, max_downloads, download_count, expires_at, created_at FROM shares WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+    },
+
+    deleteShare: async (token) => {
+        db.prepare('DELETE FROM shares WHERE token = ?').run(token);
     }
 };
