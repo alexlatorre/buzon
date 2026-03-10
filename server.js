@@ -498,18 +498,49 @@ app.delete('/api/share/:token', async (req, res) => {
 
 // --- Server Setup ---
 
-// Check for SSL certificates
-const certPath = path.join(__dirname, 'cert.pem');
-const keyPath = path.join(__dirname, 'key.pem');
+// Find SSL certificates — supports multiple locations and naming conventions
+function findSSLCerts() {
+    const locations = [
+        // Docker volume mount (Let's Encrypt naming)
+        { cert: path.join(__dirname, 'certs', 'fullchain.pem'), key: path.join(__dirname, 'certs', 'privkey.pem') },
+        // Same directory (Let's Encrypt naming)
+        { cert: path.join(__dirname, 'fullchain.pem'), key: path.join(__dirname, 'privkey.pem') },
+        // Same directory (generic naming)
+        { cert: path.join(__dirname, 'cert.pem'), key: path.join(__dirname, 'key.pem') },
+    ];
 
-if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-    const options = {
-        key: fs.readFileSync(keyPath),
-        cert: fs.readFileSync(certPath)
-    };
-    https.createServer(options, app).listen(PORT, () => {
-        console.log(`Buzon HTTPS server running at https://localhost:${PORT}`);
-    });
+    for (const loc of locations) {
+        if (fs.existsSync(loc.cert) && fs.existsSync(loc.key)) {
+            // Verify files are not empty
+            const certStat = fs.statSync(loc.cert);
+            const keyStat = fs.statSync(loc.key);
+            if (certStat.size > 0 && keyStat.size > 0) {
+                return loc;
+            }
+        }
+    }
+    return null;
+}
+
+const sslCerts = findSSLCerts();
+
+if (sslCerts) {
+    try {
+        const options = {
+            key: fs.readFileSync(sslCerts.key),
+            cert: fs.readFileSync(sslCerts.cert)
+        };
+        https.createServer(options, app).listen(PORT, () => {
+            console.log(`Buzon HTTPS server running at https://localhost:${PORT}`);
+            console.log(`  SSL cert: ${path.basename(sslCerts.cert)}, key: ${path.basename(sslCerts.key)}`);
+        });
+    } catch (err) {
+        console.error('SSL certificate error:', err.message);
+        console.log('Falling back to HTTP...');
+        app.listen(PORT, () => {
+            console.log(`Buzon HTTP server running at http://localhost:${PORT}`);
+        });
+    }
 } else {
     // Fallback to HTTP for dev or if running behind a proxy
     app.listen(PORT, () => {

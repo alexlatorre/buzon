@@ -14,16 +14,19 @@ COPY server.js config.js db.js ./
 COPY db/ ./db/
 COPY public/ ./public/
 
-# Copy SSL certificates (can be overridden with volume mount)
-COPY cert.pem key.pem ./
-
 # Create data directory for volume mount
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/certs
 
 # Expose HTTPS port
 EXPOSE 4000
 
 # Data volume — mount here for persistent storage (DB + uploaded files)
 VOLUME ["/app/data"]
+
+# SSL certs — mount your Let's Encrypt certs here:
+#   -v /path/to/fullchain.pem:/app/certs/fullchain.pem
+#   -v /path/to/privkey.pem:/app/certs/privkey.pem
+# If no certs are mounted, the server starts in HTTP mode.
+VOLUME ["/app/certs"]
 
 CMD ["node", "server.js"]
