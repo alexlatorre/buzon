@@ -166,6 +166,8 @@ docker run -d -p 443:4000 \
   --name shadow-drop shadow-drop
 ```
 
+The image is built in two stages (no compilers in the final image, ~190 MB), reports its health to Docker (`HEALTHCHECK` on `/api/integrity`) and shuts down gracefully on `docker stop`.
+
 The container runs as the unprivileged `node` user (uid 1000):
 
 - The `data` volume must be writable by uid 1000: `sudo chown -R 1000:1000 ./data`.

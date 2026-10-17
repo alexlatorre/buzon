@@ -1210,6 +1210,19 @@ const serverOptions = {
 
 // Start listening only once the database is ready (MySQL creates and migrates tables asynchronously);
 // if it cannot be reached, stop instead of answering every request with 500
+let httpServer = null;
+
+// Graceful shutdown (docker stop sends SIGTERM): stop accepting connections, let requests in flight
+// finish for up to 10 s, then exit
+function shutdown(signal) {
+    console.log(`${signal} received, shutting down`);
+    if (!httpServer) process.exit(0);
+    httpServer.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 10 * 1000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 db.ready.then(() => {
     if (sslCerts) {
         try {
@@ -1218,7 +1231,7 @@ db.ready.then(() => {
                 key: fs.readFileSync(sslCerts.key),
                 cert: fs.readFileSync(sslCerts.cert)
             };
-            https.createServer(options, app).listen(PORT, () => {
+            httpServer = https.createServer(options, app).listen(PORT, () => {
                 console.log(`Buzon HTTPS server running at https://localhost:${PORT}`);
                 console.log(`  SSL cert: ${path.basename(sslCerts.cert)}, key: ${path.basename(sslCerts.key)}`);
             });
@@ -1231,7 +1244,7 @@ db.ready.then(() => {
         }
     } else {
         // Fallback to HTTP for dev or if running behind a proxy
-        http.createServer(serverOptions, app).listen(PORT, () => {
+        httpServer = http.createServer(serverOptions, app).listen(PORT, () => {
             console.log(`Buzon HTTP server running at http://localhost:${PORT}`);
         });
     }
