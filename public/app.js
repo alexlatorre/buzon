@@ -782,7 +782,8 @@ function renderOneTimeLinks(links) {
                 const btn = item.querySelector('.copy-otl');
                 btn.textContent = "✓";
                 setTimeout(() => btn.textContent = "📋", 1500);
-            });
+            }).catch(() => alert(`Could not copy. The link is:
+${url}`));
         };
 
         // Delete functionality
@@ -1050,6 +1051,10 @@ if (btnCopyShare) {
         navigator.clipboard.writeText(shareResultLink.value).then(() => {
             btnCopyShare.textContent = '✅ Copied!';
             setTimeout(() => { btnCopyShare.textContent = '📋 Copy Link'; }, 2000);
+        }).catch(() => {
+            // The link is still selected: let the user copy it by hand
+            btnCopyShare.textContent = 'Press Ctrl+C to copy';
+            setTimeout(() => { btnCopyShare.textContent = '📋 Copy Link'; }, 3000);
         });
     });
 }
