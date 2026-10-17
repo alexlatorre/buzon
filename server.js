@@ -385,6 +385,26 @@ app.get('/api/integrity', (req, res) => {
     res.json({ files: fileHashes });
 });
 
+// Key material must have the shape public/app.js produces: 16-byte salt, RSA-OAEP public key
+// (2048-8192 bits, SPKI), AES-GCM encrypted PKCS8 key, 12-byte IV, SHA-256 auth hash
+function registrationFieldsError(body) {
+    if (base64Bytes(body.salt) !== 16) return 'Invalid salt';
+    if (base64Bytes(body.iv) !== 12) return 'Invalid IV';
+    if (base64Bytes(body.serverAuthHash) !== 32) return 'Invalid auth hash';
+    const privateKeyBytes = base64Bytes(body.encryptedPrivateKey);
+    if (privateKeyBytes < 256 || privateKeyBytes > 16 * 1024) return 'Invalid encrypted private key';
+    const publicKeyBytes = base64Bytes(body.publicKey);
+    if (publicKeyBytes < 0 || publicKeyBytes > 4096) return 'Invalid public key';
+    try {
+        const key = crypto.createPublicKey({ key: Buffer.from(body.publicKey, 'base64'), format: 'der', type: 'spki' });
+        const bits = key.asymmetricKeyDetails && key.asymmetricKeyDetails.modulusLength;
+        if (key.asymmetricKeyType !== 'rsa' || !(bits >= 2048 && bits <= 8192)) return 'Invalid public key';
+    } catch {
+        return 'Invalid public key';
+    }
+    return null;
+}
+
 // 1. Auth / Register
 app.post('/api/auth/register', async (req, res) => {
     try {
@@ -395,6 +415,10 @@ app.post('/api/auth/register', async (req, res) => {
         }
         if ([username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash].some(v => typeof v !== 'string')) {
             return res.status(400).json({ error: 'Invalid registration data' });
+        }
+        const keyError = registrationFieldsError(req.body);
+        if (keyError) {
+            return res.status(400).json({ error: keyError });
         }
 
         // Validate username format

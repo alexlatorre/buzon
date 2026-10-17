@@ -35,6 +35,36 @@ test('register rejects duplicates and bad usernames', async () => {
     assert.equal((await api.register('a!', 'x')).res.status, 400);
 });
 
+test('registration refuses malformed key material', async () => {
+    const randomB64 = bytes => b64(globalThis.crypto.getRandomValues(new Uint8Array(bytes)));
+    const keyPair = await globalThis.crypto.subtle.generateKey(
+        { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['encrypt', 'decrypt']
+    );
+    const valid = {
+        salt: randomB64(16),
+        publicKey: b64(await globalThis.crypto.subtle.exportKey('spki', keyPair.publicKey)),
+        encryptedPrivateKey: randomB64(1700),
+        iv: randomB64(12),
+        serverAuthHash: randomB64(32)
+    };
+    const cases = {
+        'salt wrong size': { salt: randomB64(4) },
+        'salt not base64': { salt: 'not base64!!' },
+        'public key not a key': { publicKey: randomB64(294) },
+        'public key huge': { publicKey: randomB64(5000) },
+        'private key not base64': { encryptedPrivateKey: '***' },
+        'private key too big': { encryptedPrivateKey: randomB64(20000) },
+        'IV wrong size': { iv: randomB64(16) },
+        'auth hash wrong size': { serverAuthHash: randomB64(20) }
+    };
+    for (const [label, override] of Object.entries(cases)) {
+        const res = await api.json('POST', '/api/auth/register', { username: `bad_${Object.keys(cases).indexOf(label)}`, ...valid, ...override });
+        assert.equal(res.status, 400, label);
+    }
+    const ok = await api.json('POST', '/api/auth/register', { username: 'goodkeys', ...valid });
+    assert.equal(ok.status, 200);
+});
+
 test('login returns a session; wrong password is rejected', async () => {
     const ok = await api.login('alice', 'correct horse battery');
     assert.equal(ok.status, 200);
