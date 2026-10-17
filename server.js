@@ -72,18 +72,24 @@ function fakeSaltFor(username) {
     return crypto.createHmac('sha256', saltSecret).update(username).digest().subarray(0, 16).toString('base64');
 }
 
-// Legacy accounts (no auth hash yet) must prove they hold the private key before a hash is accepted
-const migrationChallenges = new Map(); // userId -> { nonce, expiresAt }
+// Legacy accounts (no auth hash yet) must prove they hold the private key before a hash is accepted.
+// The nonce is encrypted under its own OAEP label so the browser cannot be used to decrypt anything
+// else (package session keys have no label), and the client answers with a hash of the nonce.
+// Both strings must match public/crypto.js.
+const MIGRATION_CHALLENGE_LABEL = Buffer.from('shadowdrop/migration-challenge/v1');
+const MIGRATION_RESPONSE_PREFIX = Buffer.from('shadowdrop/migration-response/v1');
+const migrationChallenges = new Map(); // userId -> { expectedResponse, expiresAt }
 const CHALLENGE_TTL = 5 * 60 * 1000;
 
 function createMigrationChallenge(user) {
     const nonce = crypto.randomBytes(32);
     const publicKey = crypto.createPublicKey({ key: Buffer.from(user.public_key, 'base64'), format: 'der', type: 'spki' });
     const encrypted = crypto.publicEncrypt(
-        { key: publicKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+        { key: publicKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256', oaepLabel: MIGRATION_CHALLENGE_LABEL },
         nonce
     );
-    migrationChallenges.set(user.id, { nonce: nonce.toString('base64'), expiresAt: Date.now() + CHALLENGE_TTL });
+    const expectedResponse = crypto.createHash('sha256').update(MIGRATION_RESPONSE_PREFIX).update(nonce).digest('base64');
+    migrationChallenges.set(user.id, { expectedResponse, expiresAt: Date.now() + CHALLENGE_TTL });
     return encrypted.toString('base64');
 }
 
@@ -361,7 +367,7 @@ app.post('/api/auth/login', async (req, res) => {
                 });
             }
             migrationChallenges.delete(user.id);
-            if (!safeEqual(pending.nonce, challengeResponse)) {
+            if (!safeEqual(pending.expectedResponse, challengeResponse)) {
                 return res.status(401).json({ error: 'Invalid credentials' });
             }
             console.log(`[Auth] Legacy account migrated after key-possession proof: ${username}`);

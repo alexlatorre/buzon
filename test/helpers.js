@@ -4,7 +4,9 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
+const { loadCryptoUtils } = require('./browser-crypto');
 
+const CryptoUtils = loadCryptoUtils();
 const subtle = globalThis.crypto.subtle;
 const b64 = buf => Buffer.from(buf).toString('base64');
 const unb64 = s => new Uint8Array(Buffer.from(s, 'base64'));
@@ -103,7 +105,7 @@ function client(base) {
         const res = await json('POST', '/api/auth/register', {
             username, salt: b64(salt), publicKey, encryptedPrivateKey: encPriv.ciphertext, iv: encPriv.iv, serverAuthHash
         });
-        return { res, user: { id: res.data && res.data.userId, username, password, publicKey, serverAuthHash } };
+        return { res, user: { id: res.data && res.data.userId, username, password, publicKey, privateKey: keyPair.privateKey, serverAuthHash } };
     }
 
     // Same steps as handleLogin in public/app.js, including the legacy migration challenge
@@ -115,8 +117,8 @@ function client(base) {
         if (res.data && res.data.migrationRequired) {
             const pkcs8 = new TextDecoder().decode(await aesDecrypt(masterKey, res.data.encryptedPrivateKey, res.data.iv));
             const privateKey = await subtle.importKey('pkcs8', unb64(pkcs8), { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt']);
-            const nonce = await subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, unb64(res.data.challenge));
-            res = await json('POST', '/api/auth/login', { username, serverAuthHash, challengeResponse: b64(nonce) });
+            const challengeResponse = await CryptoUtils.answerMigrationChallenge(privateKey, res.data.challenge);
+            res = await json('POST', '/api/auth/login', { username, serverAuthHash, challengeResponse });
         }
         return res;
     }

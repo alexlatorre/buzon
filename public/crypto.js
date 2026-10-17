@@ -183,5 +183,28 @@ const CryptoUtils = {
 
         const hashBuffer = await window.crypto.subtle.digest("SHA-256", combined);
         return this.bufferToBase64(hashBuffer);
+    },
+
+    // Legacy account migration: prove we hold the private key without becoming a decryption oracle.
+    // The challenge is only decrypted under its own OAEP label, so ciphertexts made without it (package
+    // session keys) fail here, and the server only gets back a hash of the nonce, never the plaintext.
+    // Both strings must match server.js.
+    MIGRATION_CHALLENGE_LABEL: "shadowdrop/migration-challenge/v1",
+    MIGRATION_RESPONSE_PREFIX: "shadowdrop/migration-response/v1",
+
+    answerMigrationChallenge: async function (privateKey, challengeBase64) {
+        const encoder = new TextEncoder();
+        const nonce = new Uint8Array(await window.crypto.subtle.decrypt(
+            { name: "RSA-OAEP", label: encoder.encode(this.MIGRATION_CHALLENGE_LABEL) },
+            privateKey,
+            this.base64ToBuffer(challengeBase64)
+        ));
+        if (nonce.byteLength !== 32) throw new Error("Unexpected migration challenge");
+
+        const prefix = encoder.encode(this.MIGRATION_RESPONSE_PREFIX);
+        const combined = new Uint8Array(prefix.byteLength + nonce.byteLength);
+        combined.set(prefix, 0);
+        combined.set(nonce, prefix.byteLength);
+        return this.bufferToBase64(await window.crypto.subtle.digest("SHA-256", combined));
     }
 };

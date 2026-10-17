@@ -162,8 +162,15 @@ async function handleLogin() {
         if (data.migrationRequired) {
             showMsg('Upgrading legacy account...', 'info');
             const legacyKey = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
-            const nonce = await CryptoUtils.decryptAsymmetric(legacyKey, data.challenge);
-            data = await postLogin({ username, serverAuthHash, challengeResponse: CryptoUtils.bufferToBase64(nonce) });
+            let challengeResponse;
+            try {
+                challengeResponse = await CryptoUtils.answerMigrationChallenge(legacyKey, data.challenge);
+            } catch (e) {
+                throw new Error('Could not verify the legacy account upgrade.');
+            }
+            data = await postLogin({ username, serverAuthHash, challengeResponse });
+            // Expired challenge or server restart between the two steps: ask the user to try again
+            if (!data.sessionToken) throw new Error('Could not verify the legacy account upgrade. Please try again.');
         }
 
         // 4. Decrypt Private Key

@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { startServer, client, b64 } = require('./helpers');
+const { loadCryptoUtils } = require('./browser-crypto');
+
+const CryptoUtils = loadCryptoUtils();
 
 let server, api, db;
 
@@ -65,6 +68,52 @@ test('legacy account cannot be claimed without the private key', async () => {
     assert.equal(storedAuthHash(user.id), 'LEGACY_MIGRATION_REQUIRED');
 });
 
+test('the server challenge is labelled and only a hash of the nonce is accepted', async () => {
+    const { user } = await api.register('legacyraw', 'raw nonce pass');
+    db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id = ?").run(user.id);
+    const challenge = (await api.json('POST', '/api/auth/login', { username: 'legacyraw', serverAuthHash: 'x' })).data.challenge;
+    const ciphertext = Buffer.from(challenge, 'base64');
+
+    // Without the label the challenge does not decrypt: it lives in its own domain
+    await assert.rejects(globalThis.crypto.subtle.decrypt({ name: 'RSA-OAEP' }, user.privateKey, ciphertext));
+
+    // Echoing the decrypted nonce (the old protocol) is rejected
+    const label = new TextEncoder().encode('shadowdrop/migration-challenge/v1');
+    const nonce = await globalThis.crypto.subtle.decrypt({ name: 'RSA-OAEP', label }, user.privateKey, ciphertext);
+    const raw = await api.json('POST', '/api/auth/login', { username: 'legacyraw', serverAuthHash: 'x', challengeResponse: b64(nonce) });
+    assert.equal(raw.status, 401);
+    assert.equal(storedAuthHash(user.id), 'LEGACY_MIGRATION_REQUIRED');
+});
+
+test('a non-string challenge answer never opens a session', async () => {
+    const { user } = await api.register('legacytype', 'type pass');
+    db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id = ?").run(user.id);
+    await api.json('POST', '/api/auth/login', { username: 'legacytype', serverAuthHash: 'x' });
+    for (const challengeResponse of [123, null, [], {}, true]) {
+        const res = await api.json('POST', '/api/auth/login', { username: 'legacytype', serverAuthHash: 'x', challengeResponse });
+        assert.equal(res.status, 200);
+        assert.equal(res.data.migrationRequired, true);
+        assert.equal(res.data.sessionToken, undefined);
+    }
+});
+
+test('a correct challenge answer works only once', async () => {
+    const { user } = await api.register('legacyonce', 'once pass');
+    const setLegacy = () => db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id = ?").run(user.id);
+    setLegacy();
+    const { challenge } = (await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: 'x' })).data;
+    const challengeResponse = await CryptoUtils.answerMigrationChallenge(user.privateKey, challenge);
+    const first = await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: user.serverAuthHash, challengeResponse });
+    assert.equal(first.status, 200);
+    assert.ok(first.data.sessionToken);
+
+    // Replaying the same answer later must not be accepted again, even if the account is legacy again
+    setLegacy();
+    const replay = await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: 'attacker', challengeResponse });
+    assert.equal(replay.data.sessionToken, undefined);
+    assert.equal(storedAuthHash(user.id), 'LEGACY_MIGRATION_REQUIRED');
+});
+
 test('legacy account owner migrates by answering the challenge', async () => {
     const res = await api.login('legacy', 'legacy pass');
     assert.equal(res.status, 200);
@@ -86,7 +135,8 @@ test('unknown users get a well-formed, stable fake salt', async () => {
 
 test('protected endpoints require a valid session for the same user', async () => {
     const alice = (await api.login('alice', 'correct horse battery')).data;
-    const legacy = (await api.login('legacy', 'legacy pass')).data;
+    await api.register('mallory', 'mallory pass');
+    const legacy = (await api.login('mallory', 'mallory pass')).data;
     assert.equal((await api.json('GET', `/api/packages/${alice.id}`)).status, 401);
     assert.equal((await api.json('GET', `/api/packages/${alice.id}`, null, 'not-a-token')).status, 401);
     assert.equal((await api.json('GET', `/api/packages/${alice.id}`, null, legacy.sessionToken)).status, 403);
