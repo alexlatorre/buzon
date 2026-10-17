@@ -246,10 +246,10 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
 | `drop.js` | `b9c09fe71b9eaa68babaf3d41f6d084c0d61a408293ff970379c74867f6d9998` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `d8e9b66fe3f2768b42785b5888464f6041889bbd6ee8bee2dc000604a82dc32d` |
+| `index.html` | `8bf3db7b98e4cd473526d5056e9ea7cee3542d45aa93d2d23f540a4e2c0413fb` |
 | `about.html` | `5eea32319dfd255efd0eab6c8816c835e577adccbc0ed14a5e50599ebfc4b1e6` |
 | `drop.html` | `f615b2f5e8fdd0233104147e9ebdd9842006f54ed122666e3b9163879e05663a` |
-| `share.html` | `327917ca6c4f8e137a34d95ec7f8ea65a838da3f049505aa048ced13f8636ef6` |
+| `share.html` | `e0434b3e4644423b0aa5aa5bb47a10f8d9baa992c30f1a78e4152b9ff833450c` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):

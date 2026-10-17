@@ -23,3 +23,12 @@ test('logout closes the mobile sidebar and Inbox closes it too', () => {
     assert.match(html, /<a href="#" id="nav-inbox" class="nav-item active">Inbox<\/a>/);
     assert.match(app, /getElementById\('nav-inbox'\)\.addEventListener\('click'/);
 });
+
+test('login fields use autocomplete values browsers honour', () => {
+    assert.match(html, /<input[^>]*id="username"[^>]*autocomplete="username"/);
+    assert.match(html, /<input[^>]*id="password"[^>]*autocomplete="current-password"/);
+    assert.doesNotMatch(html, /type="password"[^>]*autocomplete="off"/);
+    // Share passwords are not the master password: browsers must not fill it in there
+    const sharePage = fs.readFileSync(path.join(__dirname, '..', 'public', 'share.html'), 'utf8');
+    assert.match(sharePage, /<input[^>]*id="share-password"[^>]*autocomplete="new-password"/);
+});
