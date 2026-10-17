@@ -114,7 +114,7 @@ npm start
 
 Open `http://localhost:4000` (or `https://` if certificates are found, see below).
 
-For MySQL also install the driver: `npm install mysql2`.
+MySQL 8 and MariaDB 10.11+ work out of the box (`mysql2` is a dependency): set `DB_ENGINE=mysql` and the `MYSQL_*` variables. The server creates and migrates the tables before accepting requests and stops if the database cannot be reached.
 
 ---
 
@@ -187,6 +187,12 @@ npm test
 ```
 
 The suite (`test/`, Node's built-in test runner, no extra dependencies) starts real server instances on random ports with throw-away data directories and drives them with the same WebCrypto steps as the browser. It covers registration and login, legacy migration, fake salts, sessions and ownership checks, drops with encrypted names, one-time links and download limits under concurrency, quotas, upload limits, share expiry, security headers, the integrity endpoint and rate limiting.
+
+The MySQL/MariaDB driver tests are skipped unless `MYSQL_TEST_URL` points at a server where the user may create databases (they create and drop a throw-away one):
+
+```bash
+MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
+```
 
 ---
 

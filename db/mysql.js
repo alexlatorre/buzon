@@ -1,145 +1,153 @@
-// db/mysql.js - MySQL Driver for Buzon
-// Note: This requires the 'mysql2' package.
-// For now, this is a structural template to prepare for MySQL support.
+// db/mysql.js - MySQL / MariaDB driver for Buzon (same interface as db/sqlite.js)
+// Tested against MariaDB 11.4 in strict mode: MYSQL_TEST_URL=mysql://user:pass@host:port npm test
 
 const { v4: uuidv4 } = require('uuid');
-let pool;
+const mysql = require('mysql2/promise'); // a hard dependency: without it the server must not start
+const config = require('../config').db.mysql;
 
-try {
-    const mysql = require('mysql2/promise');
-    const config = require('../config').db.mysql;
+// Everything in UTC: JS Dates are sent and read as UTC, and the session clock (CURRENT_TIMESTAMP,
+// UTC_TIMESTAMP) agrees with it whatever the server's own time zone is
+const pool = mysql.createPool({
+    host: config.host,
+    port: config.port,
+    user: config.user,
+    password: config.password,
+    database: config.database,
+    timezone: 'Z',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+});
+pool.pool.on('connection', connection => connection.query("SET time_zone = '+00:00'"));
 
-    pool = mysql.createPool({
-        host: config.host,
-        port: config.port,
-        user: config.user,
-        password: config.password,
-        database: config.database,
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0
-    });
+// Optional values must be bound as null: mysql2 rejects undefined
+const orNull = value => (value === undefined ? null : value);
 
-    // Initialize tables automatically
-    pool.getConnection().then(async (conn) => {
-        try {
-            await conn.query(`
-                CREATE TABLE IF NOT EXISTS users (
-                    id VARCHAR(36) PRIMARY KEY,
-                    username VARCHAR(255) UNIQUE NOT NULL,
-                    salt TEXT NOT NULL,
-                    public_key TEXT NOT NULL,
-                    encrypted_private_key TEXT NOT NULL,
-                    iv TEXT NOT NULL,
-                    server_auth_hash TEXT NOT NULL,
-                    public_link_enabled BOOLEAN DEFAULT TRUE,
-                    mailbox_quota BIGINT DEFAULT 524288000,
-                    last_login DATETIME
-                )
-            `);
+// Tables, migrations and indexes; server.js waits for this before accepting requests
+const ready = (async () => {
+    const conn = await pool.getConnection();
+    try {
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id VARCHAR(36) PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                salt TEXT NOT NULL,
+                public_key TEXT NOT NULL,
+                encrypted_private_key TEXT NOT NULL,
+                iv TEXT NOT NULL,
+                server_auth_hash TEXT NOT NULL,
+                public_link_enabled BOOLEAN DEFAULT TRUE,
+                mailbox_quota BIGINT DEFAULT 524288000,
+                last_login DATETIME
+            )
+        `);
 
-            await conn.query(`
-                CREATE TABLE IF NOT EXISTS packages (
-                    id VARCHAR(36) PRIMARY KEY,
-                    user_id VARCHAR(36) NOT NULL,
-                    sender_name VARCHAR(64),
-                    encrypted_session_key TEXT NOT NULL,
-                    encrypted_message TEXT,
-                    message_iv VARCHAR(255),
-                    status VARCHAR(20) DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-            `);
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS packages (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                sender_name VARCHAR(64),
+                encrypted_session_key TEXT NOT NULL,
+                encrypted_message MEDIUMTEXT,
+                message_iv VARCHAR(255),
+                status VARCHAR(20) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        `);
 
-            await conn.query(`
-                CREATE TABLE IF NOT EXISTS package_files (
-                    id VARCHAR(36) PRIMARY KEY,
-                    package_id VARCHAR(36) NOT NULL,
-                    original_name TEXT NOT NULL,
-                    mime_type VARCHAR(255) NOT NULL,
-                    size BIGINT NOT NULL,
-                    FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
-                )
-            `);
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS package_files (
+                id VARCHAR(36) PRIMARY KEY,
+                package_id VARCHAR(36) NOT NULL,
+                original_name TEXT NOT NULL,
+                mime_type VARCHAR(255) NOT NULL,
+                size BIGINT NOT NULL,
+                FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+            )
+        `);
 
-            await conn.query(`
-                CREATE TABLE IF NOT EXISTS one_time_links (
-                    token VARCHAR(36) PRIMARY KEY,
-                    user_id VARCHAR(36) NOT NULL,
-                    is_used BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-            `);
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS one_time_links (
+                token VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                is_used BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        `);
 
-            await conn.query(`
-                CREATE TABLE IF NOT EXISTS shares (
-                    token VARCHAR(36) PRIMARY KEY,
-                    user_id VARCHAR(36) NOT NULL,
-                    encrypted_file_key TEXT NOT NULL,
-                    key_iv VARCHAR(255) NOT NULL,
-                    salt TEXT NOT NULL,
-                    file_iv VARCHAR(255) NOT NULL,
-                    original_name TEXT NOT NULL,
-                    mime_type VARCHAR(255) NOT NULL,
-                    size BIGINT NOT NULL,
-                    encrypted_message TEXT,
-                    message_iv VARCHAR(255),
-                    max_downloads INT DEFAULT 0,
-                    download_count INT DEFAULT 0,
-                    expires_at DATETIME,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-            `);
-            // Columns added after the first release (CREATE TABLE IF NOT EXISTS won't add them)
-            const [cols] = await conn.query(
-                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'"
-            );
-            const userCols = cols.map(c => c.COLUMN_NAME);
-            const userMigrations = {
-                public_link_enabled: 'ALTER TABLE users ADD COLUMN public_link_enabled BOOLEAN DEFAULT TRUE',
-                mailbox_quota: 'ALTER TABLE users ADD COLUMN mailbox_quota BIGINT DEFAULT 524288000',
-                last_login: 'ALTER TABLE users ADD COLUMN last_login DATETIME',
-                server_auth_hash: "ALTER TABLE users ADD COLUMN server_auth_hash VARCHAR(255) NOT NULL DEFAULT 'LEGACY_MIGRATION_REQUIRED'"
-            };
-            for (const [col, sql] of Object.entries(userMigrations)) {
-                if (!userCols.includes(col)) await conn.query(sql);
-            }
-            const [shareColRows] = await conn.query(
-                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shares'"
-            );
-            if (!shareColRows.some(c => c.COLUMN_NAME === 'download_proof')) {
-                await conn.query('ALTER TABLE shares ADD COLUMN download_proof VARCHAR(64)');
-            }
-            // Indexes for the lookups done on every request (MySQL has no CREATE INDEX IF NOT EXISTS)
-            const [indexRows] = await conn.query(
-                "SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE()"
-            );
-            const existing = new Set(indexRows.map(r => r.INDEX_NAME));
-            const indexes = {
-                idx_packages_user_status: 'CREATE INDEX idx_packages_user_status ON packages(user_id, status)',
-                idx_package_files_package: 'CREATE INDEX idx_package_files_package ON package_files(package_id)',
-                idx_shares_user: 'CREATE INDEX idx_shares_user ON shares(user_id)',
-                idx_one_time_links_user: 'CREATE INDEX idx_one_time_links_user ON one_time_links(user_id, is_used)'
-            };
-            for (const [name, sql] of Object.entries(indexes)) {
-                if (!existing.has(name)) await conn.query(sql);
-            }
-            console.log("MySQL tables synchronized.");
-        } catch (err) {
-            console.error("Failed to initialize MySQL tables:", err);
-        } finally {
-            conn.release();
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS shares (
+                token VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                encrypted_file_key TEXT NOT NULL,
+                key_iv VARCHAR(255) NOT NULL,
+                salt TEXT NOT NULL,
+                file_iv VARCHAR(255) NOT NULL,
+                original_name TEXT NOT NULL,
+                mime_type VARCHAR(255) NOT NULL,
+                size BIGINT NOT NULL,
+                encrypted_message MEDIUMTEXT,
+                message_iv VARCHAR(255),
+                max_downloads INT DEFAULT 0,
+                download_count INT DEFAULT 0,
+                expires_at DATETIME,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        `);
+        // Columns added after the first release (CREATE TABLE IF NOT EXISTS won't add them)
+        const [cols] = await conn.query(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'"
+        );
+        const userCols = cols.map(c => c.COLUMN_NAME);
+        const userMigrations = {
+            public_link_enabled: 'ALTER TABLE users ADD COLUMN public_link_enabled BOOLEAN DEFAULT TRUE',
+            mailbox_quota: 'ALTER TABLE users ADD COLUMN mailbox_quota BIGINT DEFAULT 524288000',
+            last_login: 'ALTER TABLE users ADD COLUMN last_login DATETIME',
+            server_auth_hash: "ALTER TABLE users ADD COLUMN server_auth_hash VARCHAR(255) NOT NULL DEFAULT 'LEGACY_MIGRATION_REQUIRED'"
+        };
+        for (const [col, sql] of Object.entries(userMigrations)) {
+            if (!userCols.includes(col)) await conn.query(sql);
         }
-    });
-
-} catch (e) {
-    console.warn("MySQL driver 'mysql2' not found. MySQL support will not work until installed.");
-}
+        const [shareColRows] = await conn.query(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shares'"
+        );
+        if (!shareColRows.some(c => c.COLUMN_NAME === 'download_proof')) {
+            await conn.query('ALTER TABLE shares ADD COLUMN download_proof VARCHAR(64)');
+        }
+        // Indexes for the lookups done on every request (MySQL has no CREATE INDEX IF NOT EXISTS)
+        const [indexRows] = await conn.query(
+            "SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE()"
+        );
+        const existing = new Set(indexRows.map(r => r.INDEX_NAME));
+        const indexes = {
+            idx_packages_user_status: 'CREATE INDEX idx_packages_user_status ON packages(user_id, status)',
+            idx_package_files_package: 'CREATE INDEX idx_package_files_package ON package_files(package_id)',
+            idx_shares_user: 'CREATE INDEX idx_shares_user ON shares(user_id)',
+            idx_one_time_links_user: 'CREATE INDEX idx_one_time_links_user ON one_time_links(user_id, is_used)'
+        };
+        for (const [name, sql] of Object.entries(indexes)) {
+            if (!existing.has(name)) await conn.query(sql);
+        }
+        // Messages may be up to 256 KB of plaintext; TEXT stops at 64 KB
+        const [textCols] = await conn.query(
+            "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() "
+            + "AND COLUMN_NAME = 'encrypted_message' AND DATA_TYPE = 'text'"
+        );
+        for (const col of textCols) {
+            await conn.query(`ALTER TABLE ${col.TABLE_NAME} MODIFY encrypted_message MEDIUMTEXT`);
+        }
+        console.log("MySQL tables synchronized.");
+    } finally {
+        conn.release();
+    }
+})();
 
 module.exports = {
+    ready,
+
     // Structural placeholders - Implementation would map SQLite queries to MySQL syntax
     createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash) => {
         const id = uuidv4();
@@ -177,7 +185,7 @@ module.exports = {
         const id = uuidv4();
         await pool.execute(
             'INSERT INTO packages (id, user_id, sender_name, encrypted_session_key, encrypted_message, message_iv) VALUES (?, ?, ?, ?, ?, ?)',
-            [id, userId, senderName, encryptedSessionKey, encryptedMessage, messageIv]
+            [id, userId, orNull(senderName), encryptedSessionKey, encryptedMessage, messageIv]
         );
         return id;
     },
@@ -265,7 +273,8 @@ module.exports = {
         await pool.execute(
             `INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at, download_proof)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null, downloadProof || null]
+            [token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0,
+             expiresAt ? new Date(expiresAt) : null, downloadProof || null]
         );
         return token;
     },

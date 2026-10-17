@@ -109,6 +109,9 @@ if (!userCols.find(c => c.name === 'server_auth_hash')) {
 }
 
 module.exports = {
+    // Tables are created synchronously above
+    ready: Promise.resolve(),
+
     createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash) => {
         const id = uuidv4();
         db.prepare(`
