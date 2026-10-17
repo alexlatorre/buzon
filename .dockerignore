@@ -7,5 +7,10 @@ README.md
 shadow-drop.tar
 buzon.db*
 *.pem
+*.key
+*.crt
+*.tar
 certs
+docs
 .env
+.env.*
