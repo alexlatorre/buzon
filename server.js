@@ -65,6 +65,14 @@ function loadSaltSecret() {
     if (fs.existsSync(SALT_SECRET_PATH)) return fs.readFileSync(SALT_SECRET_PATH);
     const secret = crypto.randomBytes(32);
     fs.writeFileSync(SALT_SECRET_PATH, secret, { mode: 0o600 });
+    // A new secret next to existing accounts means it was lost (e.g. a restore without dotfiles):
+    // fake salts change, so comparing them over time reveals which usernames are real
+    db.countUsers().then(count => {
+        if (count > 0) {
+            console.warn(`[Security] ${SALT_SECRET_PATH} was missing and has been regenerated although the database has ${count} account(s). `
+                + 'Restore the original .salt_secret from your backup to keep unknown usernames indistinguishable.');
+        }
+    }).catch(() => {});
     return secret;
 }
 const saltSecret = loadSaltSecret();

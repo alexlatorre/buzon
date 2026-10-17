@@ -122,6 +122,10 @@ module.exports = {
         return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
     },
 
+    countUsers: async () => {
+        return db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+    },
+
     getUserById: async (id) => {
         return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     },

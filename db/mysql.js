@@ -155,6 +155,11 @@ module.exports = {
         return rows[0];
     },
 
+    countUsers: async () => {
+        const [rows] = await pool.execute('SELECT COUNT(*) AS n FROM users');
+        return Number(rows[0].n);
+    },
+
     getUserById: async (id) => {
         const [rows] = await pool.execute('SELECT * FROM users WHERE id = ?', [id]);
         return rows[0];

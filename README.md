@@ -144,6 +144,16 @@ The server looks for, in order: `certs/fullchain.pem` + `certs/privkey.pem`, `fu
 
 ---
 
+## 💾 Backups
+
+With SQLite everything lives in `DATA_DIR`: the database, `drop/`, `shares/` and `.salt_secret`. Copying `buzon.db` alone is not enough: recent changes may still be in `buzon.db-wal`.
+
+```bash
+npm run backup -- /path/to/empty/folder
+```
+
+The script uses SQLite's online backup API, so it is consistent while the server runs, and copies the upload folders and `.salt_secret`. Restore by putting the folder back as `DATA_DIR`. Keep `.salt_secret` with the database: if it is lost, the server generates a new one and logs a warning, and fake salts for unknown usernames change (which lets someone comparing them over time tell real accounts apart).
+
 ## 🐳 Docker
 
 ```bash
