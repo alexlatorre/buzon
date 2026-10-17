@@ -80,8 +80,14 @@ test('only the owner can delete a package', async () => {
     assert.equal((await api.json('DELETE', `/api/package/${pkg.id}`, null, bob.token)).status, 404);
     assert.equal((await api.json('DELETE', `/api/package/${pkg.id.toUpperCase()}`, null, bob.token)).status, 400);
     assert.equal((await api.json('DELETE', '/api/package/00000000-0000-4000-8000-000000000000', null, alice.token)).status, 404);
-    assert.equal(fs.existsSync(path.join(dropDir(), `${pkg.id}_${pkg.files[0].id}`)), true);
+    const file = path.join(dropDir(), `${pkg.id}_${pkg.files[0].id}`);
+    assert.equal(fs.existsSync(file), true);
     assert.equal((await api.json('GET', `/api/packages/${alice.id}`, null, alice.token)).data.length, 1);
+
+    // The owner can, and it removes the row and the file
+    assert.equal((await api.json('DELETE', `/api/package/${pkg.id}`, null, alice.token)).status, 200);
+    assert.equal(fs.existsSync(file), false);
+    assert.equal((await api.json('GET', `/api/packages/${alice.id}`, null, alice.token)).data.some(p => p.id === pkg.id), false);
 });
 
 test('invalid or unknown links write nothing to disk', async () => {

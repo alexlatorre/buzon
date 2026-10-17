@@ -8,7 +8,8 @@ const { startServer, client } = require('./helpers');
 let server, api, db, alice, bob;
 
 before(async () => {
-    server = await startServer();
+    // Housekeeping would purge the exhausted and expired shares these tests rely on
+    server = await startServer({ HOUSEKEEPING_DELAY_MS: String(10 * 60 * 1000) });
     api = client(server.base);
     db = new Database(path.join(server.dataDir, 'buzon.db'));
     for (const name of ['alice', 'bob']) {
