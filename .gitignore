@@ -11,6 +11,9 @@ buzon.db*
 *.crt
 certs/
 
+# Security audit reports: kept local, they explain how to exploit unfixed findings
+docs/
+
 # Local configuration and secrets
 .env
 .env.*
