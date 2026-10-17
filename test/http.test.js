@@ -110,3 +110,39 @@ test('malformed or missing JSON bodies get 400 as JSON, not 500', async () => {
         await own.stop();
     }
 });
+
+test('the three copies of the checked-file list agree', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    // The array literal right after the name, as a sorted list of its quoted entries
+    const list = (file, name) => {
+        const text = read(file);
+        const at = text.indexOf(name);
+        assert.ok(at >= 0, `${name} not found in ${file}`);
+        const open = text.indexOf('[', at);
+        const close = text.indexOf(']', open);
+        return text.slice(open + 1, close).split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean).sort();
+    };
+    const server = list('server.js', 'INTEGRITY_FILES');
+    assert.deepEqual(list('public/integrity.js', 'CRITICAL_FILES'), server);
+    assert.deepEqual(list('scripts/update-hashes.js', 'FILES'), server);
+});
+
+test('changing a public file without a restart updates the served hash', async () => {
+    const { startServerCopy } = require('./helpers');
+    const fs = require('fs');
+    const path = require('path');
+    const copy = await startServerCopy({ TLS: 'off' });
+    try {
+        const before = (await (await fetch(`${copy.base}/api/integrity`)).json()).files['style.css'];
+        const cssPath = path.join(copy.dir, 'public', 'style.css');
+        fs.appendFileSync(cssPath, '\n/* deployed without a restart */\n');
+        const served = Buffer.from(await (await fetch(`${copy.base}/style.css`)).arrayBuffer());
+        const after = (await (await fetch(`${copy.base}/api/integrity`)).json()).files['style.css'];
+        assert.notEqual(after, before);
+        assert.equal(after, require('crypto').createHash('sha256').update(served).digest('hex'));
+    } finally {
+        await copy.stop();
+    }
+});

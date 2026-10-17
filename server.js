@@ -141,24 +141,29 @@ function isValidUUID(str) {
 }
 
 // --- File Integrity System ---
-// Compute SHA-256 hashes of all critical public files at startup
+// SHA-256 of every critical public file, as served. Recomputed when a file changes on disk, so
+// updating public/ without a restart does not make every browser report a MITM.
+// The same list lives in public/integrity.js and scripts/update-hashes.js (a test keeps them equal).
 const INTEGRITY_FILES = ['app.js', 'crypto.js', 'drop.js', 'integrity.js', 'share.js', 'index.html', 'about.html', 'drop.html', 'share.html', 'style.css'];
-const fileHashes = {};
+const hashCache = new Map(); // file -> { mtimeMs, size, hash }
 
-function computeFileHashes() {
-    const publicDir = path.join(__dirname, 'public');
+function currentFileHashes() {
+    const hashes = {};
     for (const file of INTEGRITY_FILES) {
-        const filePath = path.join(publicDir, file);
-        if (fs.existsSync(filePath)) {
-            const content = fs.readFileSync(filePath);
-            const hash = crypto.createHash('sha256').update(content).digest('hex');
-            fileHashes[file] = hash;
+        const filePath = path.join(__dirname, 'public', file);
+        let stat;
+        try { stat = fs.statSync(filePath); } catch { continue; }
+        const cached = hashCache.get(file);
+        if (!cached || cached.mtimeMs !== stat.mtimeMs || cached.size !== stat.size) {
+            const hash = crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+            hashCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, hash });
         }
+        hashes[file] = hashCache.get(file).hash;
     }
-    console.log(`[Integrity] Computed SHA-256 hashes for ${Object.keys(fileHashes).length} files`);
+    return hashes;
 }
 
-computeFileHashes();
+console.log(`[Integrity] Computed SHA-256 hashes for ${Object.keys(currentFileHashes()).length} files`);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -419,7 +424,7 @@ function parseEncryptedNames(raw) {
 
 // 0. File Integrity Endpoint
 app.get('/api/integrity', (req, res) => {
-    res.json({ files: fileHashes });
+    res.json({ files: currentFileHashes() });
 });
 
 // Key material must have the shape public/app.js produces: 16-byte salt, RSA-OAEP public key

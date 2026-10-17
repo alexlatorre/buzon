@@ -192,7 +192,7 @@ async function startServerCopy(env, files = {}) {
         exited.then(() => resolve(false));
     });
     return {
-        started, exited, output: () => output, base: `http://localhost:${port}`,
+        started, exited, dir, output: () => output, base: `http://localhost:${port}`,
         async stop() {
             if (started) { proc.kill(); await exited; }
             fs.rmSync(dir, { recursive: true, force: true });
