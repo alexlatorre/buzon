@@ -734,6 +734,8 @@ const shareStepResult = document.getElementById('share-step-result');
 const shareFooterForm = document.getElementById('share-footer-form');
 const shareUploadMsg = document.getElementById('share-upload-msg');
 const shareResultLink = document.getElementById('share-result-link');
+// Anyone holding the link gets the salt and wrapped key and can guess offline, so short passwords fall fast
+const MIN_SHARE_PASSWORD_LENGTH = 12;
 const sharePwInput = document.getElementById('share-pw');
 const sharePwStrength = document.getElementById('share-pw-strength');
 const sharePwFill = document.getElementById('share-pw-fill');
@@ -830,8 +832,8 @@ async function handleShareUpload() {
         shareUploadMsg.className = 'msg error';
         return;
     }
-    if (!password || password.length < 4) {
-        shareUploadMsg.textContent = 'Password must be at least 4 characters.';
+    if (!password || password.length < MIN_SHARE_PASSWORD_LENGTH) {
+        shareUploadMsg.textContent = `Use at least ${MIN_SHARE_PASSWORD_LENGTH} characters: anyone with the link can try to guess the password offline.`;
         shareUploadMsg.className = 'msg error';
         return;
     }
