@@ -314,6 +314,23 @@ function removeUploadedFiles(req) {
     files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
 }
 
+// Quota is check-then-insert. With MySQL every query yields to the event loop, so concurrent uploads
+// for the same user could all pass the check; this serialises that section per user. It is an
+// in-process lock: enough for the single Node process this app runs as, not for several replicas.
+const quotaLocks = new Map(); // userId -> promise of the last holder
+async function lockUserQuota(userId) {
+    const previous = quotaLocks.get(userId) || Promise.resolve();
+    let release;
+    const mine = new Promise(resolve => { release = resolve; });
+    const tail = previous.then(() => mine);
+    quotaLocks.set(userId, tail);
+    await previous;
+    return () => {
+        release();
+        if (quotaLocks.get(userId) === tail) quotaLocks.delete(userId);
+    };
+}
+
 // Total storage used by a user: pending drop packages plus active shares
 async function getStorageUsage(userId) {
     const used = Number(await db.getUserMailboxUsage(userId)) || 0;
@@ -649,46 +666,51 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
             senderName = String(senderName).replace(/[\u0000-\u001f\u007f]/g, '').trim().substring(0, 64);
         }
 
-        // Validate Quota again with the real sizes, message included
-        const used = await getStorageUsage(userId);
-        const incomingSize = files.reduce((acc, f) => acc + f.size, 0) + encryptedMessage.length;
-        if (used + incomingSize > user.mailbox_quota) {
-            removeUploadedFiles(req);
-            return res.status(413).json({ error: 'Mailbox quota exceeded' });
-        }
-
-        // Consume the one-time token atomically so two concurrent drops can't both use it
-        if (isToken && !(await db.consumeToken(req.params.id))) {
-            removeUploadedFiles(req);
-            return res.status(410).json({ error: 'This link has already been used' });
-        }
-
-        // Create the package in db
-        const packageId = await db.createPackage(userId, senderName, encryptedSessionKey, encryptedMessage, messageIv);
-
-        // Register files and rename them to standard format; on any failure undo the whole package
-        const encryptedNames = parseEncryptedNames(req.body.fileNames);
-        const storedPaths = [];
+        const releaseQuota = await lockUserQuota(userId);
         try {
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                const encName = encryptedNames[i];
-                // Only encrypted names are stored; the multipart filename and type are client-chosen plaintext
-                const storedName = typeof encName === 'string' && encName.length <= 2048 && ENC_NAME_REGEX.test(encName)
-                    ? encName
-                    : UNNAMED_FILE;
-                const packageFileId = await db.addPackageFile(packageId, storedName, STORED_FILE_TYPE, file.size);
-                const newPath = path.join(DROP_DIR, `${packageId}_${packageFileId}`);
-                fs.renameSync(file.path, newPath);
-                storedPaths.push(newPath);
+            // Validate Quota again with the real sizes, message included
+            const used = await getStorageUsage(userId);
+            const incomingSize = files.reduce((acc, f) => acc + f.size, 0) + encryptedMessage.length;
+            if (used + incomingSize > user.mailbox_quota) {
+                removeUploadedFiles(req);
+                return res.status(413).json({ error: 'Mailbox quota exceeded' });
             }
-        } catch (error) {
-            storedPaths.forEach(p => { try { fs.unlinkSync(p); } catch { } });
-            await db.deletePackage(packageId).catch(() => {});
-            throw error;
-        }
 
-        res.json({ success: true, packageId });
+            // Consume the one-time token atomically so two concurrent drops can't both use it
+            if (isToken && !(await db.consumeToken(req.params.id))) {
+                removeUploadedFiles(req);
+                return res.status(410).json({ error: 'This link has already been used' });
+            }
+
+            // Create the package in db
+            const packageId = await db.createPackage(userId, senderName, encryptedSessionKey, encryptedMessage, messageIv);
+
+            // Register files and rename them to standard format; on any failure undo the whole package
+            const encryptedNames = parseEncryptedNames(req.body.fileNames);
+            const storedPaths = [];
+            try {
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const encName = encryptedNames[i];
+                    // Only encrypted names are stored; the multipart filename and type are client-chosen plaintext
+                    const storedName = typeof encName === 'string' && encName.length <= 2048 && ENC_NAME_REGEX.test(encName)
+                        ? encName
+                        : UNNAMED_FILE;
+                    const packageFileId = await db.addPackageFile(packageId, storedName, STORED_FILE_TYPE, file.size);
+                    const newPath = path.join(DROP_DIR, `${packageId}_${packageFileId}`);
+                    fs.renameSync(file.path, newPath);
+                    storedPaths.push(newPath);
+                }
+            } catch (error) {
+                storedPaths.forEach(p => { try { fs.unlinkSync(p); } catch { } });
+                await db.deletePackage(packageId).catch(() => {});
+                throw error;
+            }
+
+            res.json({ success: true, packageId });
+        } finally {
+            releaseQuota();
+        }
     } catch (error) {
         console.error('Drop error:', error);
         removeUploadedFiles(req);
@@ -831,26 +853,31 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
             return res.status(404).json({ error: 'User not found' });
         }
 
-        const usedQuota = await getStorageUsage(userId);
-        if (usedQuota + req.file.size > user.mailbox_quota) {
-            removeUploadedFiles(req);
-            return res.status(413).json({ error: 'Storage quota exceeded' });
-        }
-
-        const expiresAt = expiresIn > 0 ? new Date(Date.now() + expiresIn * 3600000).toISOString() : null;
-
-        // Row first, then the file: a failed insert leaves only the temp file, which is removed below
-        await db.createShare(
-            userId, token, encryptedFileKey, keyIv, salt, fileIv,
-            originalName, mimeType || 'application/octet-stream', req.file.size,
-            encryptedMessage || null, messageIv || null,
-            maxDownloads, expiresAt
-        );
+        const releaseQuota = await lockUserQuota(userId);
         try {
-            fs.renameSync(req.file.path, path.join(SHARE_DIR, `${token}.enc`));
-        } catch (error) {
-            await db.deleteShare(token).catch(() => {});
-            throw error;
+            const usedQuota = await getStorageUsage(userId);
+            if (usedQuota + req.file.size > user.mailbox_quota) {
+                removeUploadedFiles(req);
+                return res.status(413).json({ error: 'Storage quota exceeded' });
+            }
+
+            const expiresAt = expiresIn > 0 ? new Date(Date.now() + expiresIn * 3600000).toISOString() : null;
+
+            // Row first, then the file: a failed insert leaves only the temp file, which is removed below
+            await db.createShare(
+                userId, token, encryptedFileKey, keyIv, salt, fileIv,
+                originalName, mimeType || 'application/octet-stream', req.file.size,
+                encryptedMessage || null, messageIv || null,
+                maxDownloads, expiresAt
+            );
+            try {
+                fs.renameSync(req.file.path, path.join(SHARE_DIR, `${token}.enc`));
+            } catch (error) {
+                await db.deleteShare(token).catch(() => {});
+                throw error;
+            }
+        } finally {
+            releaseQuota();
         }
 
         res.json({ success: true, token });
