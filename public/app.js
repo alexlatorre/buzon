@@ -110,7 +110,8 @@ async function handleRegister() {
     }
 }
 
-// Decrypts the stored PKCS8 private key with the password-derived master key
+// Decrypts the stored PKCS8 private key with the password-derived master key. Also returns the key
+// fingerprint for drop links, computed from the private key so the server cannot forge it.
 async function decryptPrivateKey(masterKey, encryptedPrivateKey, iv) {
     let privKeyBuffer;
     try {
@@ -118,7 +119,11 @@ async function decryptPrivateKey(masterKey, encryptedPrivateKey, iv) {
     } catch (e) {
         throw new Error('Invalid master password.');
     }
-    return CryptoUtils.importPrivateKey(new TextDecoder().decode(privKeyBuffer));
+    const pkcs8 = new TextDecoder().decode(privKeyBuffer);
+    return {
+        privateKey: await CryptoUtils.importPrivateKey(pkcs8),
+        fingerprint: await CryptoUtils.fingerprintFromPkcs8(pkcs8)
+    };
 }
 
 async function postLogin(body) {
@@ -160,7 +165,7 @@ async function handleLogin() {
         // Legacy account: prove we hold the private key so the server accepts our auth hash
         if (data.migrationRequired) {
             showMsg('Upgrading legacy account...', 'info');
-            const legacyKey = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
+            const { privateKey: legacyKey } = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
             let challengeResponse;
             try {
                 challengeResponse = await CryptoUtils.answerMigrationChallenge(legacyKey, data.challenge);
@@ -174,18 +179,20 @@ async function handleLogin() {
 
         // 4. Decrypt Private Key
         showMsg('Decrypting private key in memory...', 'info');
-        const privateKey = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
+        const { privateKey, fingerprint } = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
 
         // 4. Setup Global state and transition. The master key and the password are not kept:
         // only the private key (not exportable) and the session token are needed from here on
         currentUser = {
             id: data.id,
             privateKey,
+            keyFingerprint: fingerprint,
             sessionToken: data.sessionToken
         };
         document.getElementById('password').value = '';
 
-        const dropUrl = `${window.location.protocol}//${window.location.host}/drop.html?id=${data.id}`;
+        // "#k=" lets senders check the key the server gives them; the fragment is never sent to the server
+        const dropUrl = CryptoUtils.dropLink(window.location.origin, data.id, fingerprint);
         dropLink.href = dropUrl;
         dropLink.textContent = dropUrl;
 
@@ -783,7 +790,7 @@ function renderOneTimeLinks(links) {
         // Copy functionality
         item.querySelector('.copy-otl').onclick = (e) => {
             e.stopPropagation();
-            const url = `${window.location.origin}/drop.html?id=${l.token}`;
+            const url = CryptoUtils.dropLink(window.location.origin, l.token, currentUser.keyFingerprint);
             navigator.clipboard.writeText(url).then(() => {
                 const btn = item.querySelector('.copy-otl');
                 btn.textContent = "✓";

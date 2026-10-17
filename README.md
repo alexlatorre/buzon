@@ -85,6 +85,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Quotas**: drops and shares share a 500 MB per-user quota.
 - **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
 - **Anti-enumeration on login**: unknown usernames get a deterministic, well-formed fake salt and the same error as a wrong password.
+- **Recipient key fingerprint in drop links**: links end in `#k=<fingerprint>`, computed by the recipient's browser from its private key. The fragment never reaches the server, and the send page refuses to encrypt to a public key that does not match it. Older links without it still work, with a warning.
 - **Subresource Integrity**: every script and stylesheet tag carries the SHA-256 of its file, so the browser refuses to run a modified file served under an unmodified page (`npm run hashes` keeps the attributes current).
 - **File integrity check**: the 10 frontend files are hashed by the server and by the browser, compared with the hashes seen on the previous visit, and linked to GitHub for external comparison.
 - **Boss key** (double ESC): instant logout and memory wipe.
@@ -96,6 +97,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 Be clear about what Shadow Drop protects against:
 
 - **A malicious or compromised server can serve modified JavaScript** that steals your password. The integrity check makes this visible (it alerts when files change between visits and lets you compare with the [trusted hashes](#-trusted-hashes-sha-256)), but it cannot prevent it: whoever controls the server also controls `integrity.js`.
+- **The drop link fingerprint protects against a tampered API or database, not against a server that controls its own HTTP responses**: such a server can redirect the send page to a link carrying its own `#k`, which is the same power as serving modified pages. The send page shows the fingerprint in use, so a sender can compare it with the one the recipient gave them.
 - **Metadata is visible to the server**: who receives packages, when, how many files and their encrypted sizes, the sender name the sender typed, and for shares the file name and type (shown to the recipient before they enter the password).
 - **Offline guessing**: the salt and encrypted private key of a user, and the salt and wrapped key of a share, are available to an attacker who gets the database (or, for shares, the link). PBKDF2 with 600 000 iterations slows guessing down; a strong password is still the real protection.
 - **Registration reveals whether a username exists** (it must, to avoid duplicates). Login does not.
@@ -264,16 +266,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `fe70f50ba9e534ce3ea6069b9622f306924a616b875074047c696a6de9420908` |
-| `crypto.js` | `af2f299ba7c7d0db4751b8be26c6c4421e5d24af8d66ba3b0e1d0cc75961f7b9` |
+| `app.js` | `dd8e0f9117da5ff12a67ad118bd22f667f1bb9d73f589f97a39776e28256fc6d` |
+| `crypto.js` | `fc87afd4a6715a5ffa068c9024546f76c5fd7ae28d60f075e92e578c344d3382` |
 | `integrity.js` | `1874d51cc1054644a2d1eb5eec3478c02ec3fb8db951230e7f4d6fed72560465` |
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
-| `drop.js` | `b9c09fe71b9eaa68babaf3d41f6d084c0d61a408293ff970379c74867f6d9998` |
+| `drop.js` | `614ab9efffc6730624bc2eb3a41a9aa3495ab7d04d77b02a2ed06fbbcbb60003` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `19e8307d8e5e469bd8b35a6afbb8133e806d5f561f429c09760b2bbe44fb53b4` |
+| `index.html` | `5ccd64196c82e1c1e57f62e7b981baa844c5e476fc34cd04d6843f58d096e8e9` |
 | `about.html` | `aebd79f290af5d3b0bad2cb8745afc9d85e06fa326e8d20f9e5995ad171094b4` |
-| `drop.html` | `f30c938327d1fb1782674331ade063b2d653476b89e319357ae1e6f2aeec73d4` |
-| `share.html` | `6f686e29d28cc38f15373e4d0175b239000a1ef8b94a8bc817b8b205f08c20e9` |
+| `drop.html` | `432f204390e09f2f8bd1c80ee5487114401b8ff3dbc7d1cee11556803c330e6c` |
+| `share.html` | `aa1153740b3bb37658d490d0510523ae6c75c672abe7b3c4bfe2fd22fd355717` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):

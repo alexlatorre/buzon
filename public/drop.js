@@ -2,6 +2,10 @@
 
 const urlParams = new URLSearchParams(window.location.search);
 const targetUserId = urlParams.get('id');
+// Recipient key fingerprint from the link fragment (#k=...), which the server never sees:
+// a string, null for links without one, false when the fragment is malformed
+const expectedKeyFingerprint = CryptoUtils.parseKeyFragment(window.location.hash);
+const LINK_ID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const statusMsg = document.getElementById('status-msg');
 const sysStatus = document.getElementById('system-status');
@@ -22,9 +26,10 @@ function showMsg(msg, type = 'info') {
 }
 
 async function fetchPublicKey() {
-    if (!targetUserId) {
-        sysStatus.textContent = 'Error: Missing target UUID in URL';
+    if (!targetUserId || !LINK_ID_FORMAT.test(targetUserId) || expectedKeyFingerprint === false) {
+        sysStatus.textContent = 'Error: this link is malformed';
         sysStatus.className = 'status-offline';
+        showMsg('This link is not valid. Ask the recipient to send it again.', 'error');
         return;
     }
 
@@ -32,9 +37,21 @@ async function fetchPublicKey() {
         const res = await fetch(`/api/user/${targetUserId}/public-key`);
         const data = await res.json();
         if (res.ok) {
+            // A key that does not match the link could be the server's own: never encrypt to it
+            const verified = expectedKeyFingerprint !== null && await CryptoUtils.verifyRecipientKey(data.publicKey, expectedKeyFingerprint);
+            if (expectedKeyFingerprint !== null && !verified) {
+                sysStatus.textContent = 'Error: recipient key does not match the link';
+                sysStatus.className = 'status-offline';
+                showMsg('The key provided by the server is not the one in this link. Nothing was sent. Ask the recipient for a new link.', 'error');
+                return;
+            }
             targetPublicKey = await CryptoUtils.importPublicKey(data.publicKey);
-            sysStatus.textContent = 'Status: Ready to transmit';
+            // Show the fingerprint in use so the sender can compare it with the one the recipient gave them
+            sysStatus.textContent = verified ? `Status: Recipient key verified (${expectedKeyFingerprint}), ready to transmit` : 'Status: Ready to transmit';
             sysStatus.className = 'status-online';
+            if (!verified) {
+                showMsg('This link has no key fingerprint, so the recipient key cannot be verified. Ask the recipient for a current link if you can.', 'info');
+            }
             btnSubmit.disabled = false;
         } else {
             throw new Error(data.error);

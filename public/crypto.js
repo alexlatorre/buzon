@@ -186,6 +186,46 @@ const CryptoUtils = {
         return this.bufferToBase64(hashBuffer);
     },
 
+    // Recipient key fingerprint for drop links ("#k=..."): base64url SHA-256 of the SPKI public key,
+    // cut to 22 characters (~128 bits). The fragment never reaches the server, so a sender can check
+    // that the public key the server hands out is really the recipient's.
+    publicKeyFingerprint: async function (spkiBase64) {
+        const digest = new Uint8Array(await window.crypto.subtle.digest("SHA-256", this.base64ToBuffer(spkiBase64)));
+        return this.bufferToBase64(digest).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "").slice(0, 22);
+    },
+
+    // The recipient computes it from their private key, which the server cannot forge: the public
+    // half (n, e) is read from the private key and re-encoded as SPKI
+    fingerprintFromPkcs8: async function (base64Pkcs8) {
+        const subtle = window.crypto.subtle;
+        const params = { name: "RSA-OAEP", hash: "SHA-256" };
+        const privateKey = await subtle.importKey("pkcs8", this.base64ToBuffer(base64Pkcs8), params, true, ["decrypt"]);
+        const { n, e } = await subtle.exportKey("jwk", privateKey);
+        const publicKey = await subtle.importKey("jwk", { kty: "RSA", n, e, alg: "RSA-OAEP-256", ext: true }, params, true, ["encrypt"]);
+        return this.publicKeyFingerprint(this.bufferToBase64(await subtle.exportKey("spki", publicKey)));
+    },
+
+    verifyRecipientKey: async function (spkiBase64, expectedFingerprint) {
+        if (typeof expectedFingerprint !== "string" || expectedFingerprint.length !== 22) return false;
+        return (await this.publicKeyFingerprint(spkiBase64)) === expectedFingerprint;
+    },
+
+    // Builds a drop link with the key fingerprint. Both parts are checked so that a value coming from
+    // the server (the account id, a one-time token) cannot inject its own "#k=" into the link.
+    dropLink: function (origin, linkId, fingerprint) {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(linkId)) throw new Error("Invalid link id");
+        if (!/^[A-Za-z0-9_-]{22}$/.test(fingerprint)) throw new Error("Invalid key fingerprint");
+        return `${origin}/drop.html?id=${linkId}#k=${fingerprint}`;
+    },
+
+    // Reads the fragment of a drop link: the fingerprint, null when there is none (old links), or
+    // false when it is anything other than exactly "#k=<22 characters>"
+    parseKeyFragment: function (hash) {
+        if (!hash || hash === "#") return null;
+        const match = /^#k=([A-Za-z0-9_-]{22})$/.exec(hash);
+        return match ? match[1] : false;
+    },
+
     // Drop attachments: the stored payload holds only the encrypted bytes and their IV. The name
     // travels separately as "enc:<iv>:<ciphertext>" and the type is never sent, so nothing readable
     // about the file reaches the server.
