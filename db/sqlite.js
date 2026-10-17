@@ -88,6 +88,10 @@ if (!userCols.find(c => c.name === 'mailbox_quota')) {
 if (!userCols.find(c => c.name === 'last_login')) {
     db.exec("ALTER TABLE users ADD COLUMN last_login DATETIME");
 }
+const shareCols = db.prepare("PRAGMA table_info(shares)").all();
+if (!shareCols.find(c => c.name === 'download_proof')) {
+    db.exec("ALTER TABLE shares ADD COLUMN download_proof TEXT");
+}
 if (!userCols.find(c => c.name === 'server_auth_hash')) {
     // For existing users, we cannot magically compute the hash because we don't know their masterKey.
     // They will be locked out unless they re-register or we reset their accounts.
@@ -198,11 +202,11 @@ module.exports = {
     },
 
     // --- Shares ---
-    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt) => {
+    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt, downloadProof) => {
         db.prepare(`
-            INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null);
+            INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at, download_proof)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null, downloadProof || null);
         return token;
     },
 
@@ -226,6 +230,11 @@ module.exports = {
 
     deletePackageFile: async (id) => {
         db.prepare('DELETE FROM package_files WHERE id = ?').run(id);
+    },
+
+    // Gives back a download whose transfer did not complete
+    refundShareDownload: async (token) => {
+        db.prepare('UPDATE shares SET download_count = download_count - 1 WHERE token = ? AND download_count > 0').run(token);
     },
 
     getAllShareLimits: async () => {

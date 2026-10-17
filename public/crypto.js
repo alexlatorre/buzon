@@ -242,6 +242,20 @@ const CryptoUtils = {
         return cleaned || "file";
     },
 
+    // Share downloads: only someone who unwrapped the file key with the password can compute this,
+    // so holding the link alone cannot use up the download limit. The server stores the hash, which
+    // reveals nothing about the 256-bit key. Must match server.js.
+    SHARE_DOWNLOAD_PREFIX: "shadowdrop/share-download/v1",
+
+    shareDownloadProof: async function (rawFileKey) {
+        const prefix = new TextEncoder().encode(this.SHARE_DOWNLOAD_PREFIX);
+        const key = new Uint8Array(rawFileKey);
+        const combined = new Uint8Array(prefix.byteLength + key.byteLength);
+        combined.set(prefix, 0);
+        combined.set(key, prefix.byteLength);
+        return this.bufferToBase64(await window.crypto.subtle.digest("SHA-256", combined));
+    },
+
     // Legacy account migration: prove we hold the private key without becoming a decryption oracle.
     // The challenge is only decrypted under its own OAEP label, so ciphertexts made without it (package
     // session keys) fail here, and the server only gets back a hash of the nonce, never the plaintext.

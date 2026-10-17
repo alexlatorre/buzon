@@ -893,6 +893,7 @@ async function handleShareUpload() {
         formData.append('mimeType', file.type || 'application/octet-stream');
         formData.append('maxDownloads', maxDownloads);
         formData.append('expiresIn', expiresIn);
+        formData.append('downloadProof', await CryptoUtils.shareDownloadProof(rawKey));
         if (encryptedMessage) {
             formData.append('encryptedMessage', encryptedMessage);
             formData.append('messageIv', messageIv);

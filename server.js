@@ -300,6 +300,7 @@ function shareFieldsError(body) {
     } else if (body.messageIv !== undefined) {
         return 'Invalid message IV';
     }
+    if (body.downloadProof !== undefined && base64Bytes(body.downloadProof) !== 32) return 'Invalid download proof';
     if (intField(body.maxDownloads, 0, 1000) === null) return 'maxDownloads must be 0-1000';
     if (intField(body.expiresIn, 0, 8760) === null) return 'expiresIn must be 0-8760 hours';
     return null;
@@ -840,7 +841,7 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
             removeUploadedFiles(req);
             return res.status(400).json({ error: fieldError });
         }
-        const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv } = req.body;
+        const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv, downloadProof } = req.body;
         const maxDownloads = intField(req.body.maxDownloads, 0, 1000);
         const expiresIn = intField(req.body.expiresIn, 0, 8760);
 
@@ -868,7 +869,7 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
                 userId, token, encryptedFileKey, keyIv, salt, fileIv,
                 originalName, mimeType || 'application/octet-stream', req.file.size,
                 encryptedMessage || null, messageIv || null,
-                maxDownloads, expiresAt
+                maxDownloads, expiresAt, downloadProof || null
             );
             try {
                 fs.renameSync(req.file.path, path.join(SHARE_DIR, `${token}.enc`));
@@ -952,12 +953,28 @@ app.get('/api/share/:token/download', async (req, res) => {
             return res.status(404).json({ error: 'File not found on disk' });
         }
 
+        // HEAD would count as a download without transferring anything
+        if (req.method !== 'GET') {
+            return res.status(405).set('Allow', 'GET').end();
+        }
+
+        // Shares created with a proof can only be downloaded by someone who unwrapped the key with the
+        // password; a link holder (or a link-preview bot) gets 403 and uses up nothing
+        if (share.download_proof && !safeEqual(share.download_proof, req.get('X-Download-Proof') || '')) {
+            return res.status(403).json({ error: 'Download proof required' });
+        }
+
         // Count the download atomically; fails if a concurrent request took the last one
         if (!(await db.incrementShareDownloads(share.token))) {
             return res.status(410).json({ error: 'Download limit reached' });
         }
 
-        res.sendFile(filePath);
+        // A transfer that does not complete gives the download back
+        res.sendFile(filePath, err => {
+            if (err) {
+                db.refundShareDownload(share.token).catch(e => console.error('Download refund failed:', e.message));
+            }
+        });
     } catch (error) {
         console.error('Share download error:', error);
         res.status(500).json({ error: 'Server error' });

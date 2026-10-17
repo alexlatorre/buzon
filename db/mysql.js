@@ -107,6 +107,12 @@ try {
             for (const [col, sql] of Object.entries(userMigrations)) {
                 if (!userCols.includes(col)) await conn.query(sql);
             }
+            const [shareColRows] = await conn.query(
+                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shares'"
+            );
+            if (!shareColRows.some(c => c.COLUMN_NAME === 'download_proof')) {
+                await conn.query('ALTER TABLE shares ADD COLUMN download_proof VARCHAR(64)');
+            }
             console.log("MySQL tables synchronized.");
         } catch (err) {
             console.error("Failed to initialize MySQL tables:", err);
@@ -236,11 +242,11 @@ module.exports = {
     },
 
     // --- Shares ---
-    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt) => {
+    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt, downloadProof) => {
         await pool.execute(
-            `INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null]
+            `INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at, download_proof)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null, downloadProof || null]
         );
         return token;
     },
@@ -272,6 +278,11 @@ module.exports = {
 
     deletePackageFile: async (id) => {
         await pool.execute('DELETE FROM package_files WHERE id = ?', [id]);
+    },
+
+    // Gives back a download whose transfer did not complete
+    refundShareDownload: async (token) => {
+        await pool.execute('UPDATE shares SET download_count = download_count - 1 WHERE token = ? AND download_count > 0', [token]);
     },
 
     getAllShareLimits: async () => {

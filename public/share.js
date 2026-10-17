@@ -166,7 +166,9 @@
 
             // 4. Download the encrypted file
             btnDownload.textContent = '📥 Downloading encrypted file...';
-            const fileRes = await fetch(`/api/share/${TOKEN}/download`);
+            const fileRes = await fetch(`/api/share/${TOKEN}/download`, {
+                headers: { 'X-Download-Proof': await CryptoUtils.shareDownloadProof(fileKeyRaw) }
+            });
             if (!fileRes.ok) {
                 const errData = await fileRes.json().catch(() => ({}));
                 throw new Error(errData.error || 'Error downloading file');
