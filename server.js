@@ -1129,6 +1129,7 @@ async function purgeExpiredPackages() {
 }
 
 async function housekeeping() {
+    await db.deleteUsedOneTimeLinks().catch(e => console.error('One-time link cleanup error:', e.message));
     await purgeDeadShares();
     await purgeExpiredPackages();
     await sweepOrphanFiles();

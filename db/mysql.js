@@ -290,6 +290,11 @@ module.exports = {
         return rows;
     },
 
+    // A used one-time link can never resolve again, so the row is only clutter
+    deleteUsedOneTimeLinks: async () => {
+        await pool.execute('DELETE FROM one_time_links WHERE is_used = 1');
+    },
+
     getAllShareLimits: async () => {
         const [rows] = await pool.execute('SELECT token, max_downloads, download_count, expires_at FROM shares');
         return rows;

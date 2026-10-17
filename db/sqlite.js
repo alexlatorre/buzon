@@ -241,6 +241,11 @@ module.exports = {
         return db.prepare('SELECT id, created_at FROM packages').all();
     },
 
+    // A used one-time link can never resolve again, so the row is only clutter
+    deleteUsedOneTimeLinks: async () => {
+        db.prepare('DELETE FROM one_time_links WHERE is_used = 1').run();
+    },
+
     getAllShareLimits: async () => {
         return db.prepare('SELECT token, max_downloads, download_count, expires_at FROM shares').all();
     },

@@ -281,6 +281,7 @@ async function fetchPackages() {
     if (!currentUser.id) return;
 
     btnRefresh.textContent = 'Scanning...';
+    fetchOneTimeLinks(); // a link may have been used since the last refresh
     try {
         const res = await authFetch(`/api/packages/${currentUser.id}`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
