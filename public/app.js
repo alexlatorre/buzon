@@ -3,7 +3,6 @@
 // Global State
 let currentUser = {
     id: null,
-    masterKey: null,
     privateKey: null,
     sessionToken: null
 };
@@ -177,13 +176,14 @@ async function handleLogin() {
         showMsg('Decrypting private key in memory...', 'info');
         const privateKey = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
 
-        // 4. Setup Global state and transition
+        // 4. Setup Global state and transition. The master key and the password are not kept:
+        // only the private key (not exportable) and the session token are needed from here on
         currentUser = {
             id: data.id,
-            masterKey,
             privateKey,
             sessionToken: data.sessionToken
         };
+        document.getElementById('password').value = '';
 
         const dropUrl = `${window.location.protocol}//${window.location.host}/drop.html?id=${data.id}`;
         dropLink.href = dropUrl;
@@ -221,7 +221,6 @@ function secureLogout() {
         // 1. Wipe sensitive keys from memory
         currentUser = {
             id: null,
-            masterKey: null,
             privateKey: null,
             sessionToken: null
         };
@@ -230,9 +229,20 @@ function secureLogout() {
         currentPackageSessionKey = null;
         shareListUI.replaceChildren();
 
-        // 2. Clear form fields
+        // 2. Clear form fields and everything decrypted or personal that is still in the page
         document.getElementById('password').value = '';
         document.getElementById('username').value = '';
+        document.getElementById('modal-sender').textContent = '';
+        document.getElementById('modal-date').textContent = '';
+        document.getElementById('modal-message').textContent = '';
+        document.getElementById('modal-files').replaceChildren();
+        pkgList.replaceChildren();
+        otlListUI.replaceChildren();
+        dropLink.href = '#';
+        dropLink.textContent = '';
+        document.getElementById('share-pw').value = '';
+        document.getElementById('share-note').value = '';
+        shareResultLink.value = '';
 
         // 3. Switch panels
         dashPanel.classList.remove('active');
@@ -243,7 +253,7 @@ function secureLogout() {
         // 4. Update status
         sysStatus.textContent = 'System: Offline';
         sysStatus.className = 'status-offline';
-        showMsg('Vault locked and memory wiped.', 'info');
+        showMsg('Vault locked: keys dropped and decrypted content cleared from the page.', 'info');
         closeModal();
     } catch (e) {
         // Force logout even if something fails
@@ -943,7 +953,7 @@ async function handleShareUpload() {
         btnShareUpload.textContent = '🔑 Deriving key...';
         const salt = CryptoUtils.generateSalt(16);
         const saltBuffer = CryptoUtils.base64ToBuffer(salt);
-        const derivedKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
+        const derivedKey = await CryptoUtils.deriveMasterKey(password, saltBuffer, false);
 
         // 4. Export and wrap AES key with derived key
         const rawKey = await window.crypto.subtle.exportKey('raw', aesKey);

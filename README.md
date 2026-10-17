@@ -240,8 +240,8 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `f291df35593f3d9490824adf7b08458a62c9a2d3481c2ff4f8e3185f2e38bda9` |
-| `crypto.js` | `eb21b69f540396a22e4ea4f1bd35a00490e27026dad2a33075fdaaad6487db0c` |
+| `app.js` | `0f0966ea64436a065ac671a409d16a1bfa768b1dd71a949404eb5743c6543d3e` |
+| `crypto.js` | `af2f299ba7c7d0db4751b8be26c6c4421e5d24af8d66ba3b0e1d0cc75961f7b9` |
 | `integrity.js` | `3891adc44c05e55b436347f8d5a43a82992e7c1a14585ebef060bdc1ed4041fe` |
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
 | `drop.js` | `cc639892f1841c211ccf971f535e8e32292a6cbb0da817ab1fd42f016b52a187` |

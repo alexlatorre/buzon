@@ -17,7 +17,8 @@ const CryptoUtils = {
     },
 
     // Derive an AES-GCM Master Key from a Password and Salt using PBKDF2
-    deriveMasterKey: async function (password, saltBuffer) {
+    // extractable: only the login master key needs it (computeServerAuthHash reads its raw bytes)
+    deriveMasterKey: async function (password, saltBuffer, extractable = true) {
         const encoder = new TextEncoder();
         const passKey = await window.crypto.subtle.importKey(
             "raw",
@@ -36,7 +37,7 @@ const CryptoUtils = {
             },
             passKey,
             { name: "AES-GCM", length: 256 },
-            true,
+            extractable,
             ["encrypt", "decrypt"]
         );
     },
@@ -86,7 +87,7 @@ const CryptoUtils = {
             "pkcs8",
             buffer,
             { name: "RSA-OAEP", hash: "SHA-256" },
-            true,
+            false, // never exported again once in memory
             ["decrypt"]
         );
     },
@@ -165,7 +166,7 @@ const CryptoUtils = {
             "raw",
             buffer,
             { name: "AES-GCM" },
-            true,
+            false, // only used to decrypt the package
             ["encrypt", "decrypt"]
         );
     },
