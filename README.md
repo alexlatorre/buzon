@@ -79,7 +79,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Sessions**: random bearer tokens (`Authorization: Bearer`), 24 h lifetime, ownership checked on every user resource (packages, files, shares, links).
 - **Strict CSP and headers**: `script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, HSTS, `nosniff`, `no-referrer`, `no-store`, no CORS.
 - **Untrusted data rendered as text**: sender names and file names never go through `innerHTML`.
-- **Rate limiting**: auth (20 / 15 min), uploads (50 / 15 min) and API (200 / 15 min) per IP. `X-Forwarded-For` is only trusted when configured (see `TRUST_PROXY`).
+- **Rate limiting**: auth (20 / 15 min), uploads (50 / 15 min) and API (200 / 15 min) per IP. `X-Forwarded-For` is only trusted when a proxy is declared (`TRUST_PROXY`, or `TLS=off`).
 - **Upload hardening**: drop links and quota are checked **before** anything is written to disk; at most 20 files × 50 MB per drop and 1 file × 100 MB per share; multer errors are returned as JSON.
 - **Race-free limits**: one-time links and download limits are enforced with atomic conditional updates.
 - **Quotas**: drops and shares share a 500 MB per-user quota.
@@ -130,7 +130,7 @@ All settings are environment variables; nothing secret lives in the repository.
 | `MYSQL_USER` / `MYSQL_PASSWORD` | `root` / *(empty)* | MySQL credentials. Use a dedicated user. |
 | `MYSQL_DATABASE` | `buzon` | MySQL database name. |
 | `TLS` | *(on)* | `off` forces plain HTTP even if certificates exist (TLS terminated by a proxy). |
-| `TRUST_PROXY` | `1` without certs, `false` with certs | Express `trust proxy` setting. Set it to the number of proxies in front of the app; use `false` when the app is exposed directly, otherwise clients can forge `X-Forwarded-For` and bypass rate limits. |
+| `TRUST_PROXY` | `1` with `TLS=off`, otherwise `false` | Express `trust proxy` setting: the number of proxies in front of the app, or `false`. Only set it when a proxy really sits in front, otherwise clients can forge `X-Forwarded-For` and bypass rate limits. `true` is refused at startup. |
 | `AUTH_RATE_LIMIT` | `20` | Auth requests per IP every 15 minutes. |
 
 ### TLS certificates
@@ -294,7 +294,7 @@ npm start      # http://localhost:4000
 npm test       # batería de pruebas automáticas
 ```
 
-Se configura con variables de entorno (tabla completa en [Configuration](#-configuration)): `PORT`, `DATA_DIR`, `DB_ENGINE`, `MYSQL_*`, `TLS=off` para servir HTTP detrás de un proxy, `TRUST_PROXY` (pon `false` si el servidor está expuesto directamente) y `AUTH_RATE_LIMIT`.
+Se configura con variables de entorno (tabla completa en [Configuration](#-configuration)): `PORT`, `DATA_DIR`, `DB_ENGINE`, `MYSQL_*`, `TLS=off` para servir HTTP detrás de un proxy, `TRUST_PROXY` (número de proxies delante; por defecto `false`, o `1` con `TLS=off`) y `AUTH_RATE_LIMIT`.
 
 ## Docker
 ```bash

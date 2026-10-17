@@ -153,12 +153,17 @@ const PORT = process.env.PORT || 4000;
 // TLS=off forces plain HTTP (TLS terminated by a reverse proxy, or tests)
 const sslCerts = process.env.TLS === 'off' ? null : findSSLCerts();
 
-// Only trust X-Forwarded-For when a reverse proxy sits in front. Serving HTTPS directly,
-// clients could forge the header and dodge the rate limiters. TRUST_PROXY overrides the default.
+// X-Forwarded-For decides the client IP the rate limiters see, so it is only trusted when the
+// operator says a proxy is in front: TRUST_PROXY, or TLS=off (the documented "TLS terminated by a
+// proxy" mode, one hop). Otherwise clients could forge it and dodge every limit.
 function parseTrustProxy(value) {
-    if (value === undefined || value === '') return sslCerts ? false : 1;
-    if (value === 'true') return true;
+    if (value === undefined || value === '') return process.env.TLS === 'off' ? 1 : false;
     if (value === 'false') return false;
+    if (value === 'true') {
+        console.error('TRUST_PROXY=true trusts every X-Forwarded-For entry, so clients could bypass the rate limits. '
+            + 'Set it to the number of proxies in front of the app (for example 1) or to false.');
+        process.exit(1);
+    }
     if (/^\d+$/.test(value)) return Number(value);
     return value;
 }
