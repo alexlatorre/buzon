@@ -242,7 +242,7 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 |---|---|
 | `app.js` | `fe70f50ba9e534ce3ea6069b9622f306924a616b875074047c696a6de9420908` |
 | `crypto.js` | `af2f299ba7c7d0db4751b8be26c6c4421e5d24af8d66ba3b0e1d0cc75961f7b9` |
-| `integrity.js` | `3891adc44c05e55b436347f8d5a43a82992e7c1a14585ebef060bdc1ed4041fe` |
+| `integrity.js` | `1874d51cc1054644a2d1eb5eec3478c02ec3fb8db951230e7f4d6fed72560465` |
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
 | `drop.js` | `b9c09fe71b9eaa68babaf3d41f6d084c0d61a408293ff970379c74867f6d9998` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |

@@ -17,33 +17,26 @@ const IntegrityCheck = {
         return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     },
 
-    // Compute SHA-256 hash of a string using Web Crypto API
-    async sha256(text) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-        const hash = await window.crypto.subtle.digest('SHA-256', data);
+    // SHA-256 (hex) of bytes, or of a string's UTF-8 encoding
+    async sha256(data) {
+        const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+        const hash = await window.crypto.subtle.digest('SHA-256', bytes);
         return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
     },
 
-    // Generate a short combined fingerprint from all file hashes
-    combinedFingerprint(hashes) {
-        const combined = Object.values(hashes).sort().join('');
-        // Take first 8 chars + last 4 chars as short fingerprint
-        if (combined.length < 12) return '...';
-        const simpleHash = combined.split('').reduce((acc, ch, i) => {
-            return acc ^ (ch.charCodeAt(0) * (i + 1));
-        }, 0);
-        const first = Object.values(hashes)[0] || '';
-        return first.substring(0, 8).toUpperCase();
+    // Short fingerprint of the whole set: a digest over every "file:hash", so any file changes it
+    async fingerprintOf(hashes) {
+        const lines = Object.keys(hashes).sort().map(file => `${file}:${hashes[file]}`).join(';');
+        if (!lines) return '...';
+        return (await this.sha256(lines)).substring(0, 8).toUpperCase();
     },
 
-    // Fetch a file's raw content and compute its hash
+    // Fetch a file and hash its raw bytes, exactly as the server does (text() would drop a BOM)
     async hashFile(filename) {
         try {
             const res = await fetch(`/${filename}`, { cache: 'no-store' });
             if (!res.ok) return null;
-            const text = await res.text();
-            return await this.sha256(text);
+            return await this.sha256(await res.arrayBuffer());
         } catch {
             return null;
         }
@@ -179,7 +172,7 @@ const IntegrityCheck = {
         if (!this.indicator) return;
 
         this.lastDetails = details;
-        const fingerprint = details.clientHashes ? this.combinedFingerprint(details.clientHashes) : '...';
+        const fingerprint = details.clientHashes && this.fingerprint ? this.fingerprint : '...';
 
         switch (status) {
             case 'ok':
@@ -278,6 +271,7 @@ const IntegrityCheck = {
                 const hash = await this.hashFile(file);
                 if (hash) clientHashes[file] = hash;
             }
+            this.fingerprint = await this.fingerprintOf(clientHashes);
 
             // 3. Compare client-computed vs server-reported (detects MITM/proxy tampering)
             const serverMismatches = [];
