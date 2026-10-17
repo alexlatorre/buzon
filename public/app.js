@@ -359,7 +359,9 @@ async function openPackage(id) {
                     <span class="file-name"></span>
                     <span class="file-size">(${(f.size / 1024).toFixed(2)} KB)</span>
                 `;
-                fileInfo.querySelector('.file-name').textContent = f.displayName;
+                const nameEl = fileInfo.querySelector('.file-name');
+                nameEl.textContent = f.displayName;
+                nameEl.title = f.displayName;
 
                 const downloadBtn = document.createElement('button');
                 downloadBtn.className = 'btn-icon-download';
@@ -454,23 +456,15 @@ async function downloadFile(f) {
         });
         if (!res.ok) throw new Error('Download failed');
 
-        const fileBlob = await res.blob();
-        const fileBuffer = await fileBlob.arrayBuffer();
+        const decryptedBuffer = await CryptoUtils.decryptDropFile(currentPackageSessionKey, await res.text());
 
-        const jsonStr = new TextDecoder().decode(fileBuffer);
-        const payload = JSON.parse(jsonStr);
-
-        const decryptedBuffer = await CryptoUtils.decryptSymmetric(currentPackageSessionKey, payload.ciphertext, payload.iv);
-
-        // Metadata restoration
-        const resolvedFilename = payload.filename || f.displayName;
-        const resolvedMime = payload.mimeType || f.mime_type || 'application/octet-stream';
-
-        const decBlob = new Blob([decryptedBuffer], { type: resolvedMime });
+        // Save under the decrypted name shown in the inbox, never under a name or type taken from the
+        // stored payload, and with a neutral type so the browser never renders the file itself
+        const decBlob = new Blob([decryptedBuffer], { type: 'application/octet-stream' });
         const url = URL.createObjectURL(decBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = resolvedFilename;
+        a.download = f.displayName;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -484,14 +478,7 @@ async function downloadFile(f) {
 // Drop pages send file names encrypted with the package session key ("enc:<iv>:<ciphertext>");
 // older packages still have them in clear text
 async function decryptFileName(storedName) {
-    if (!storedName || !storedName.startsWith('enc:')) return storedName;
-    const [, iv, ciphertext] = storedName.split(':');
-    try {
-        const nameBuffer = await CryptoUtils.decryptSymmetric(currentPackageSessionKey, ciphertext, iv);
-        return new TextDecoder().decode(nameBuffer);
-    } catch {
-        return 'encrypted-file';
-    }
+    return CryptoUtils.decryptDropName(currentPackageSessionKey, storedName);
 }
 
 async function downloadFiles() {

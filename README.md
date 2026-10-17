@@ -235,12 +235,12 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `ab24fab7990555deb0603465a1efaa2f3b2687e9fc920835f12320f07dd577a6` |
-| `crypto.js` | `7cfabda38f1497ea34562cbbcbe898912364aa13d868a5c9de17e40f51cce21c` |
+| `app.js` | `6e20ff0cf9751c5401230184f7758c2372b578feecf68a71d9c27b7bc3145c2c` |
+| `crypto.js` | `d9c405aed9a1fe5fd8a7c67a4f5055b8d42b3b24f523ef037d38c43d325b0a60` |
 | `integrity.js` | `3891adc44c05e55b436347f8d5a43a82992e7c1a14585ebef060bdc1ed4041fe` |
 | `share.js` | `bd68cd9b5f5d865a21dfc6f4055c4484008c523889dcec73d151356e474f1f0a` |
-| `drop.js` | `31d6a9fd17d19be85b16899dd9df093776b70016fcb541bf8e0e95f260f5e21d` |
-| `style.css` | `7010497f5780066110fbddaa4604234adfc33fd64b635a28d560d7392471109b` |
+| `drop.js` | `cc639892f1841c211ccf971f535e8e32292a6cbb0da817ab1fd42f016b52a187` |
+| `style.css` | `7c2d77fa058b555a62dbf0a46d40cf1ad85d27aae78a2b1ec347de749c66e2bc` |
 | `index.html` | `4e43db093b5218ad8e822baf0ae0d81363e75df688efc984b9c932a86c78ef55` |
 | `about.html` | `5eea32319dfd255efd0eab6c8816c835e577adccbc0ed14a5e50599ebfc4b1e6` |
 | `drop.html` | `23e6cd33fce3d27d050f855b17880eae32f4e9dc67d32a5e951c93f800f7f7cd` |

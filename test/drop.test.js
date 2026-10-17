@@ -3,7 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
-const { startServer, client, aesDecrypt } = require('./helpers');
+const { startServer, client } = require('./helpers');
+const { loadCryptoUtils } = require('./browser-crypto');
+
+const CryptoUtils = loadCryptoUtils();
 
 let server, api, db, alice, bob;
 
@@ -36,8 +39,32 @@ test('drop stores the package with encrypted file names', async () => {
     const stored = pkg.files[0].original_name;
     assert.match(stored, /^enc:/);
     assert.ok(!stored.includes('secreto'));
-    const [, iv, ciphertext] = stored.split(':');
-    assert.equal(new TextDecoder().decode(await aesDecrypt(drop.sessionKey, ciphertext, iv)), 'secreto.txt');
+    assert.equal(await CryptoUtils.decryptDropName(drop.sessionKey, stored), 'secreto.txt');
+
+    // Neither the file on disk nor the DB row carries the name or a real type in clear text
+    const onDisk = fs.readFileSync(path.join(dropDir(), `${pkg.id}_${pkg.files[0].id}`), 'utf8');
+    assert.ok(!onDisk.includes('secreto'), 'stored file leaks the name');
+    assert.ok(!onDisk.includes('text/plain'), 'stored file leaks the type');
+    assert.deepEqual(Object.keys(JSON.parse(onDisk)).sort(), ['ciphertext', 'iv']);
+    assert.equal(pkg.files[0].mime_type, 'application/octet-stream');
+});
+
+test('a plaintext multipart filename is never stored', async () => {
+    // An old or hand-made client that sends the real name and type and no encrypted names
+    const form = new FormData();
+    form.append('senderName', 'old client');
+    form.append('encryptedSessionKey', 'AAAA');
+    form.append('encryptedMessage', 'AAAA');
+    form.append('messageIv', 'AAAAAAAAAAAAAAAA');
+    form.append('files', new Blob(['x'], { type: 'text/plain' }), 'informe-confidencial.txt');
+    const res = await fetch(`${server.base}/api/drop/${alice.id}`, { method: 'POST', body: form });
+    assert.equal(res.status, 200);
+    const { packageId } = await res.json();
+
+    const row = db.prepare('SELECT original_name, mime_type FROM package_files WHERE package_id = ?').get(packageId);
+    assert.equal(row.original_name, 'file');
+    assert.equal(row.mime_type, 'application/octet-stream');
+    await api.json('DELETE', `/api/package/${packageId}`, null, alice.token);
 });
 
 test('only the owner can download a package file', async () => {

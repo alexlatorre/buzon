@@ -280,6 +280,8 @@ async function resolveDropTarget(req, res, next) {
 
 // File names from the drop page arrive encrypted with the package session key
 const ENC_NAME_REGEX = /^enc:[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/;
+const UNNAMED_FILE = 'file';
+const STORED_FILE_TYPE = 'application/octet-stream';
 function parseEncryptedNames(raw) {
     try {
         const names = JSON.parse(raw || '[]');
@@ -526,10 +528,11 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const encName = encryptedNames[i];
+            // Only encrypted names are stored; the multipart filename and type are client-chosen plaintext
             const storedName = typeof encName === 'string' && encName.length <= 2048 && ENC_NAME_REGEX.test(encName)
                 ? encName
-                : file.originalname;
-            const packageFileId = await db.addPackageFile(packageId, storedName, file.mimetype, file.size);
+                : UNNAMED_FILE;
+            const packageFileId = await db.addPackageFile(packageId, storedName, STORED_FILE_TYPE, file.size);
             const newPath = path.join(DROP_DIR, `${packageId}_${packageFileId}`);
             fs.renameSync(file.path, newPath);
         }

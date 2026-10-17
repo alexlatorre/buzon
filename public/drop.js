@@ -151,20 +151,11 @@ btnSubmit.addEventListener('click', async () => {
         for (let i = 0; i < selectedFiles.length; i++) {
             const file = selectedFiles[i];
             const arrayBuffer = await file.arrayBuffer();
-            const encObj = await CryptoUtils.encryptSymmetric(sessionKey, arrayBuffer);
 
-            // The server only ever sees the encrypted name
-            const encName = await CryptoUtils.encryptSymmetric(sessionKey, new TextEncoder().encode(file.name));
-            encryptedNames.push(`enc:${encName.iv}:${encName.ciphertext}`);
-
-            const payloadStr = JSON.stringify({
-                ciphertext: encObj.ciphertext,
-                iv: encObj.iv,
-                filename: file.name,
-                mimeType: file.type
-            });
-            const blob = new Blob([payloadStr], { type: 'application/json' });
-            formData.append('files', blob, 'encrypted.bin');
+            // The server only ever sees the encrypted bytes and the encrypted name
+            const { payload, encryptedName } = await CryptoUtils.encryptDropFile(sessionKey, arrayBuffer, file.name);
+            encryptedNames.push(encryptedName);
+            formData.append('files', new Blob([payload], { type: 'application/octet-stream' }), 'encrypted.bin');
         }
         formData.append('fileNames', JSON.stringify(encryptedNames));
 

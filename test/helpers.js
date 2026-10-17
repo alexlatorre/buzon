@@ -135,11 +135,9 @@ function client(base) {
         form.append('messageIv', message.iv);
         const names = [];
         for (const f of files) {
-            const enc = await aesEncrypt(sessionKey, new TextEncoder().encode(f.content));
-            const name = await aesEncrypt(sessionKey, new TextEncoder().encode(f.name));
-            names.push(`enc:${name.iv}:${name.ciphertext}`);
-            const payload = JSON.stringify({ ...enc, filename: f.name, mimeType: 'text/plain' });
-            form.append('files', new Blob([payload], { type: 'application/json' }), 'encrypted.bin');
+            const { payload, encryptedName } = await CryptoUtils.encryptDropFile(sessionKey, new TextEncoder().encode(f.content), f.name);
+            names.push(encryptedName);
+            form.append('files', new Blob([payload], { type: 'application/octet-stream' }), 'encrypted.bin');
         }
         form.append('fileNames', JSON.stringify(names));
         const res = await fetch(`${base}/api/drop/${linkId}`, { method: 'POST', body: form });

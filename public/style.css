@@ -702,9 +702,9 @@ input:checked + .slider:before {
 .file-name {
   font-weight: 500;
   color: var(--text-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* wrap instead of truncating, so the real extension is always visible */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .file-size {
@@ -1518,10 +1518,6 @@ input:checked + .slider:before {
   .modal-file-info {
     gap: 0.5rem;
     font-size: 0.8125rem;
-  }
-
-  .file-name {
-    max-width: 140px;
   }
 
   .message-box {

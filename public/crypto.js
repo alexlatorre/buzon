@@ -185,6 +185,63 @@ const CryptoUtils = {
         return this.bufferToBase64(hashBuffer);
     },
 
+    // Drop attachments: the stored payload holds only the encrypted bytes and their IV. The name
+    // travels separately as "enc:<iv>:<ciphertext>" and the type is never sent, so nothing readable
+    // about the file reaches the server.
+    encryptDropFile: async function (sessionKey, fileBuffer, fileName) {
+        const body = await this.encryptSymmetric(sessionKey, fileBuffer);
+        // Pad the name with NULs to a multiple of 256 bytes so its ciphertext does not reveal its length
+        const nameBytes = new TextEncoder().encode(fileName);
+        const paddedName = new Uint8Array(Math.max(256, Math.ceil(nameBytes.length / 256) * 256));
+        paddedName.set(nameBytes);
+        const name = await this.encryptSymmetric(sessionKey, paddedName);
+        return {
+            payload: JSON.stringify({ ciphertext: body.ciphertext, iv: body.iv }),
+            encryptedName: `enc:${name.iv}:${name.ciphertext}`
+        };
+    },
+
+    decryptDropFile: async function (sessionKey, payloadText) {
+        const payload = JSON.parse(payloadText);
+        return this.decryptSymmetric(sessionKey, payload.ciphertext, payload.iv);
+    },
+
+    // Name shown in the inbox and used for the download. Encrypted names are "enc:<iv>:<ciphertext>";
+    // anything else was stored before names were encrypted.
+    decryptDropName: async function (sessionKey, storedName) {
+        const match = /^enc:([A-Za-z0-9+/]+=*):([A-Za-z0-9+/]+=*)$/.exec(String(storedName || ""));
+        let name;
+        if (match) {
+            try {
+                name = new TextDecoder().decode(await this.decryptSymmetric(sessionKey, match[2], match[1]));
+            } catch (e) {
+                return "encrypted-file";
+            }
+            name = name.replace(/\0+$/, "");
+        } else {
+            name = this.fixLatin1Name(String(storedName || ""));
+        }
+        return this.cleanFileName(name);
+    },
+
+    // Old plaintext names went through multer, which reads UTF-8 names as latin1 ("nÃ³minas")
+    fixLatin1Name: function (name) {
+        if (!/[\u0080-\u00ff]/.test(name) || /[^\u0000-\u00ff]/.test(name)) return name;
+        try {
+            return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(name, c => c.charCodeAt(0)));
+        } catch (e) {
+            return name;
+        }
+    },
+
+    // The sender chooses the name: drop invisible and bidi control characters (U+202E can show
+    // "reportexe.pdf" for "report<U+202E>fdp.exe") and collapse whitespace used to push the real
+    // extension out of view
+    cleanFileName: function (name) {
+        const cleaned = name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "").replace(/\s+/gu, " ").trim();
+        return cleaned || "file";
+    },
+
     // Legacy account migration: prove we hold the private key without becoming a decryption oracle.
     // The challenge is only decrypted under its own OAEP label, so ciphertexts made without it (package
     // session keys) fail here, and the server only gets back a hash of the nonce, never the plaintext.
