@@ -114,7 +114,7 @@ npm start
 
 Open `http://localhost:4000` (or `https://` if certificates are found, see below).
 
-MySQL 8 and MariaDB 10.11+ work out of the box (`mysql2` is a dependency): set `DB_ENGINE=mysql` and the `MYSQL_*` variables. The server creates and migrates the tables before accepting requests and stops if the database cannot be reached.
+MySQL/MariaDB support is built in (`mysql2` is a dependency; tested against MariaDB 11.4 in strict mode): set `DB_ENGINE=mysql` and the `MYSQL_*` variables. The server creates and migrates the tables before accepting requests and stops if the database cannot be reached.
 
 ---
 
@@ -227,10 +227,15 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 
 - **Auth hashes**: existing rows are re-hashed automatically on each user's next login.
 - **Legacy accounts** (`LEGACY_MIGRATION_REQUIRED`): they cannot log in by default. Start the server with `LEGACY_MIGRATION=open`, let their owners log in once (the browser answers a key-possession challenge), then remove the variable.
-- **MySQL**: missing `users` columns are added on startup.
+- **MySQL / MariaDB**: missing columns, larger message columns and indexes are added on startup; the server waits for that before accepting requests.
 - **Configuration**: `config.js` no longer holds credentials; move them to the environment variables above.
 - **Docker**: the image now runs as uid 1000; fix volume and key permissions as described in [Docker](#-docker).
-- **Drops**: file names are encrypted for packages sent with the new `drop.js`. Older packages keep their plain names and still open normally.
+- **Drops**: names and types are no longer stored in clear. Files stored before that change still carry them inside their JSON on disk; they disappear as those packages are destroyed or expire (30 days by default).
+- **Shares**: new shares need a download proof derived from the password, so link holders cannot use up downloads; shares created before keep working without it. Share passwords now need 12 characters.
+- **Pending packages expire** after `PACKAGE_RETENTION_DAYS` (30 by default); set `0` before upgrading to keep the old behaviour.
+- **Restart after changing `public/`** is no longer required for the integrity check, but run `npm run hashes` after any frontend change: the pages carry Subresource Integrity hashes, and a stale one makes the browser refuse the file.
+- **Users will see "Changes detected"** in the integrity badge after each release that changes the frontend. Tell them to compare with the [trusted hashes](#-trusted-hashes-sha-256) before accepting.
+- **Crypto parameters are fixed** (PBKDF2 600 000 iterations, RSA-OAEP 4096, AES-GCM 256): there is no per-account record of them yet, so changing them would lock existing accounts out.
 
 ---
 
