@@ -88,6 +88,14 @@ if (!userCols.find(c => c.name === 'mailbox_quota')) {
 if (!userCols.find(c => c.name === 'last_login')) {
     db.exec("ALTER TABLE users ADD COLUMN last_login DATETIME");
 }
+// Indexes for the lookups done on every request (quota, inbox, shares, one-time links)
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_packages_user_status ON packages(user_id, status);
+  CREATE INDEX IF NOT EXISTS idx_package_files_package ON package_files(package_id);
+  CREATE INDEX IF NOT EXISTS idx_shares_user ON shares(user_id);
+  CREATE INDEX IF NOT EXISTS idx_one_time_links_user ON one_time_links(user_id, is_used);
+`);
+
 const shareCols = db.prepare("PRAGMA table_info(shares)").all();
 if (!shareCols.find(c => c.name === 'download_proof')) {
     db.exec("ALTER TABLE shares ADD COLUMN download_proof TEXT");

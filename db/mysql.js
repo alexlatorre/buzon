@@ -113,6 +113,20 @@ try {
             if (!shareColRows.some(c => c.COLUMN_NAME === 'download_proof')) {
                 await conn.query('ALTER TABLE shares ADD COLUMN download_proof VARCHAR(64)');
             }
+            // Indexes for the lookups done on every request (MySQL has no CREATE INDEX IF NOT EXISTS)
+            const [indexRows] = await conn.query(
+                "SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE()"
+            );
+            const existing = new Set(indexRows.map(r => r.INDEX_NAME));
+            const indexes = {
+                idx_packages_user_status: 'CREATE INDEX idx_packages_user_status ON packages(user_id, status)',
+                idx_package_files_package: 'CREATE INDEX idx_package_files_package ON package_files(package_id)',
+                idx_shares_user: 'CREATE INDEX idx_shares_user ON shares(user_id)',
+                idx_one_time_links_user: 'CREATE INDEX idx_one_time_links_user ON one_time_links(user_id, is_used)'
+            };
+            for (const [name, sql] of Object.entries(indexes)) {
+                if (!existing.has(name)) await conn.query(sql);
+            }
             console.log("MySQL tables synchronized.");
         } catch (err) {
             console.error("Failed to initialize MySQL tables:", err);
