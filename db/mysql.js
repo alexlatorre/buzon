@@ -309,6 +309,9 @@ module.exports = {
         await pool.execute('DELETE FROM one_time_links WHERE is_used = 1');
     },
 
+    // Nothing to do: MySQL manages its own logs
+    compact: async () => {},
+
     getAllShareLimits: async () => {
         const [rows] = await pool.execute('SELECT token, max_downloads, download_count, expires_at FROM shares');
         return rows;

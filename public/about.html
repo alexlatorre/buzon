@@ -656,7 +656,10 @@
         </div>
 
         <p class="conclusion">
-          <strong>Result:</strong> Even if the server were compromised, the attacker would only find unintelligible binary data. Your master password is the only key, and it <strong>never leaves your browser</strong>.
+          <strong>Result:</strong> Even if the server were compromised, the attacker could not read your messages or files. Your master password is the only key, and it <strong>never leaves your browser</strong>.
+        </p>
+        <p class="conclusion">
+          <strong>What the server does see:</strong> who receives packages and when, how many files they have and their encrypted size, the sender name the sender typed (not verified), your username and last login, and for shared files the file name, type and size.
         </p>
       </div>
     </section>
@@ -680,7 +683,7 @@
           <div class="feature-icon">📤</div>
           <div class="feature-text">
             <h4>Secure File Sharing</h4>
-            <p>Drag & drop a file, set an unlock password, and share a link. The file is encrypted with AES-256-GCM and the key wrapped with PBKDF2 (600K iterations). Recipients decrypt and download entirely in their browser — the server never sees the content or the password.</p>
+            <p>Drag & drop a file, set an unlock password, and share a link. The file is encrypted with AES-256-GCM and the key wrapped with PBKDF2 (600K iterations). Recipients decrypt and download entirely in their browser — the server never sees the content or the password (it does see the file name and size).</p>
           </div>
         </li>
         <li>
@@ -694,14 +697,14 @@
           <div class="feature-icon">💣</div>
           <div class="feature-text">
             <h4>Package Destruction</h4>
-            <p>Permanently delete packages from the server after reading them. Encrypted files are wiped from disk with no possibility of recovery.</p>
+            <p>Delete packages from the server after reading them. The encrypted files are deleted and their database records overwritten. Packages you keep are deleted automatically after 30 days.</p>
           </div>
         </li>
         <li>
           <div class="feature-icon">⚡</div>
           <div class="feature-text">
             <h4>Boss Key (Double ESC)</h4>
-            <p>Press Escape twice quickly to instantly log out. Your private key is immediately erased from RAM.</p>
+            <p>Press Escape twice quickly to instantly log out: your keys are dropped and everything decrypted is cleared from the page.</p>
           </div>
         </li>
         <li>

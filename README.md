@@ -248,7 +248,7 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 | `drop.js` | `b9c09fe71b9eaa68babaf3d41f6d084c0d61a408293ff970379c74867f6d9998` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
 | `index.html` | `19e8307d8e5e469bd8b35a6afbb8133e806d5f561f429c09760b2bbe44fb53b4` |
-| `about.html` | `d6feb181b4a0827be3fab6047412eaa0630a22871b73638f8f2241883c44ad45` |
+| `about.html` | `aebd79f290af5d3b0bad2cb8745afc9d85e06fa326e8d20f9e5995ad171094b4` |
 | `drop.html` | `f30c938327d1fb1782674331ade063b2d653476b89e319357ae1e6f2aeec73d4` |
 | `share.html` | `6f686e29d28cc38f15373e4d0175b239000a1ef8b94a8bc817b8b205f08c20e9` |
 <!-- hashes:end -->

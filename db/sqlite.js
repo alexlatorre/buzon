@@ -10,6 +10,8 @@ const dbPath = path.join(dataDir, 'buzon.db');
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
+// Overwrite deleted content instead of leaving it in free pages of the file
+db.pragma('secure_delete = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -252,6 +254,11 @@ module.exports = {
     // A used one-time link can never resolve again, so the row is only clutter
     deleteUsedOneTimeLinks: async () => {
         db.prepare('DELETE FROM one_time_links WHERE is_used = 1').run();
+    },
+
+    // Fold the WAL back into the database and truncate it, so deleted rows do not linger there
+    compact: async () => {
+        db.pragma('wal_checkpoint(TRUNCATE)');
     },
 
     getAllShareLimits: async () => {

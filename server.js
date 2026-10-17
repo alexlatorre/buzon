@@ -1138,6 +1138,7 @@ async function housekeeping() {
     await purgeDeadShares();
     await purgeExpiredPackages();
     await sweepOrphanFiles();
+    await db.compact().catch(e => console.error('Database compaction error:', e.message));
 }
 setTimeout(housekeeping, Number(process.env.HOUSEKEEPING_DELAY_MS) || 10 * 1000);
 setInterval(housekeeping, 60 * 60 * 1000);
