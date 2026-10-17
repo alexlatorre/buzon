@@ -63,8 +63,8 @@ Everything runs in the browser with the Web Crypto API (`window.crypto.subtle`).
 |---|---|
 | **Register** | `PBKDF2(password, random 16-byte salt, 600 000 iterations, SHA-256)` → AES-256 master key. An RSA-4096 key pair is generated; the private key is encrypted with the master key (AES-GCM) before upload. |
 | **Login** | The browser derives the master key again and sends only `serverAuthHash = SHA-256(masterKey ‖ "SERVER_AUTH")`. The server stores `SHA-256(serverAuthHash)`, compares in constant time and returns the encrypted private key, which is decrypted in memory. |
-| **Send (drop)** | The sender's browser fetches your public key, creates a random AES-256-GCM session key, encrypts the message, **each file and each file name** with it, and wraps the session key with RSA-OAEP. |
-| **Receive** | Your private key unwraps the session key, which decrypts message, names and files. |
+| **Send (drop)** | The sender's browser fetches your public key, creates a random AES-256-GCM session key, encrypts the message, **each file and each file name** with it, and wraps the session key with RSA-OAEP under its own label. Each ciphertext is bound to its role with associated data: the message seals the sender name and a list of random file ids, each name carries its file's id, and each file body (sent as raw bytes, IV ‖ ciphertext) can only be decrypted under that id. |
+| **Receive** | Your private key unwraps the session key, which decrypts message, names and files. The inbox compares the files and sender name the server lists with the sealed ones and warns about any difference. |
 | **Share** | A random AES-256-GCM key encrypts the file; that key is wrapped with `PBKDF2(share password, random salt, 600 000)`. |
 
 The server never sees passwords, master keys, private keys, session keys, messages, file contents or (for drops) file names.
@@ -85,6 +85,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Quotas**: drops and shares share a 500 MB per-user quota.
 - **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
 - **Anti-enumeration on login**: unknown usernames get a deterministic, well-formed fake salt and the same error as a wrong password.
+- **Packages sealed as a whole** (drop format 2): the server cannot swap file bodies, names or messages between slots or packages, drop or duplicate a file, or change the sender name without the inbox showing a warning; a package relabelled to the old format does not open.
 - **Recipient key fingerprint in drop links**: links end in `#k=<fingerprint>`, computed by the recipient's browser from its private key. The fragment never reaches the server, and the send page refuses to encrypt to a public key that does not match it. Older links without it still work, with a warning.
 - **Subresource Integrity**: every script and stylesheet tag carries the SHA-256 of its file, so the browser refuses to run a modified file served under an unmodified page (`npm run hashes` keeps the attributes current).
 - **File integrity check**: the 10 frontend files are hashed by the server and by the browser, compared with the hashes seen on the previous visit, and linked to GitHub for external comparison.
@@ -100,6 +101,7 @@ Be clear about what Shadow Drop protects against:
 - **The drop link fingerprint protects against a tampered API or database, not against a server that controls its own HTTP responses**: such a server can redirect the send page to a link carrying its own `#k`, which is the same power as serving modified pages. The send page shows the fingerprint in use, so a sender can compare it with the one the recipient gave them.
 - **Metadata is visible to the server**: who receives packages, when, how many files and their encrypted sizes, the sender name the sender typed, and for shares the file name and type (shown to the recipient before they enter the password).
 - **Offline guessing**: the salt and encrypted private key of a user, and the salt and wrapped key of a share, are available to an attacker who gets the database (or, for shares, the link). PBKDF2 with 600 000 iterations slows guessing down; a strong password is still the real protection.
+- **A stored package can be served again**: nothing ties a package to a date or a position in the inbox, so the server can show a copy of a real package twice, or with another date. It cannot change what is inside.
 - **Registration reveals whether a username exists** (it must, to avoid duplicates). Login does not.
 - **Sessions are kept in memory**: restarting the server logs everyone out.
 
@@ -234,6 +236,7 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 - **Docker**: the image now runs as uid 1000; fix volume and key permissions as described in [Docker](#-docker).
 - **Drops**: names and types are no longer stored in clear. Files stored before that change still carry them inside their JSON on disk; they disappear as those packages are destroyed or expire (30 days by default).
 - **Shares**: new shares need a download proof derived from the password, so link holders cannot use up downloads; shares created before keep working without it. Share passwords now need 12 characters.
+- **Drop format 2**: new drops are stored with `format = 2` (a column added on startup). Packages sent before still open; their names and files use the previous format. File bodies are now raw bytes, 28 bytes larger than the file. The 256 KB message limit now also covers the sealed file list and sender name. Do not roll back to a version before format 2 while it receives drops: an older server accepts them but stores them as format 1, and they will not open.
 - **Pending packages expire** after `PACKAGE_RETENTION_DAYS` (30 by default); set `0` before upgrading to keep the old behaviour.
 - **Restart after changing `public/`** is no longer required for the integrity check, but run `npm run hashes` after any frontend change: the pages carry Subresource Integrity hashes, and a stale one makes the browser refuse the file.
 - **Users will see "Changes detected"** in the integrity badge after each release that changes the frontend. Tell them to compare with the [trusted hashes](#-trusted-hashes-sha-256) before accepting.
@@ -266,16 +269,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `dd8e0f9117da5ff12a67ad118bd22f667f1bb9d73f589f97a39776e28256fc6d` |
-| `crypto.js` | `fc87afd4a6715a5ffa068c9024546f76c5fd7ae28d60f075e92e578c344d3382` |
+| `app.js` | `685d0c70417213162ae67c60137526b694e63aeb57932f4ca261c2f98bd05728` |
+| `crypto.js` | `257d73180a705acf3e8b3ea7abfe89cd3a897c22302e03bffb1d348122e14f8f` |
 | `integrity.js` | `1874d51cc1054644a2d1eb5eec3478c02ec3fb8db951230e7f4d6fed72560465` |
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
-| `drop.js` | `614ab9efffc6730624bc2eb3a41a9aa3495ab7d04d77b02a2ed06fbbcbb60003` |
+| `drop.js` | `0caee606e7046451a88f569b0be1d1bf95af631b3a7183356c69a78eacab5f3a` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `5ccd64196c82e1c1e57f62e7b981baa844c5e476fc34cd04d6843f58d096e8e9` |
+| `index.html` | `4ddf4bced77628b627edc0762dd3eaa5a93cf62ea845b3b4a530e8e01447bd01` |
 | `about.html` | `aebd79f290af5d3b0bad2cb8745afc9d85e06fa326e8d20f9e5995ad171094b4` |
-| `drop.html` | `432f204390e09f2f8bd1c80ee5487114401b8ff3dbc7d1cee11556803c330e6c` |
-| `share.html` | `aa1153740b3bb37658d490d0510523ae6c75c672abe7b3c4bfe2fd22fd355717` |
+| `drop.html` | `524efb49647a66e687c54edc4d76d2f4c16fb775a1975f8e5c84a73f55e8c3ce` |
+| `share.html` | `38761c77fe44766cc87e6e1de432e940597543f5fbd80fe94ae2c23cde9ebb60` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -300,6 +303,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 ## Seguridad
 - **Cifrado de extremo a extremo**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iteraciones).
 - **El servidor no ve** contraseñas, claves, mensajes, contenido de ficheros ni (en los envíos) sus nombres.
+- **Paquetes sellados** (formato 2): el servidor no puede intercambiar ficheros, nombres o mensajes, quitar o duplicar un fichero ni cambiar el nombre del remitente sin que la bandeja lo avise.
 - **Hash de autenticación protegido**: la base de datos guarda un hash del token de login; si se filtra, no sirve para entrar.
 - **Migración de cuentas antiguas, cerrada por defecto**: no pueden entrar salvo con `LEGACY_MIGRATION=open`; entonces solo se actualizan si el navegador descifra un reto cifrado con la clave pública de la cuenta.
 - **Sesiones** con token `Bearer` de 24 h y comprobación de propietario en paquetes, ficheros, shares y enlaces.

@@ -111,6 +111,13 @@ const ready = (async () => {
         for (const [col, sql] of Object.entries(userMigrations)) {
             if (!userCols.includes(col)) await conn.query(sql);
         }
+        // Package format: 1 = original, 2 = AAD-bound ciphertexts and raw file bodies
+        const [packageColRows] = await conn.query(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'packages'"
+        );
+        if (!packageColRows.some(c => c.COLUMN_NAME === 'format')) {
+            await conn.query('ALTER TABLE packages ADD COLUMN format INT DEFAULT 1');
+        }
         const [shareColRows] = await conn.query(
             "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shares'"
         );
@@ -181,11 +188,11 @@ module.exports = {
         await pool.execute('UPDATE users SET server_auth_hash = ? WHERE id = ?', [hash, userId]);
     },
 
-    createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv) => {
+    createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {
         const id = uuidv4();
         await pool.execute(
-            'INSERT INTO packages (id, user_id, sender_name, encrypted_session_key, encrypted_message, message_iv) VALUES (?, ?, ?, ?, ?, ?)',
-            [id, userId, orNull(senderName), encryptedSessionKey, encryptedMessage, messageIv]
+            'INSERT INTO packages (id, user_id, sender_name, encrypted_session_key, encrypted_message, message_iv, format) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [id, userId, orNull(senderName), encryptedSessionKey, encryptedMessage, messageIv, format]
         );
         return id;
     },

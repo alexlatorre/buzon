@@ -36,12 +36,12 @@ const shareDir = () => path.join(server.dataDir, 'shares');
 const countPackages = () => db.prepare('SELECT COUNT(*) AS n FROM packages').get().n;
 
 // A drop body with valid-looking fields (RSA-2048 key, 12-byte IV, small message); override any of them
-function dropForm(override = {}, { files = 1, extra = [] } = {}) {
+function dropForm(override = {}, { files = 1, extra = [], bodySize } = {}) {
     const fields = { senderName: 'Bob', encryptedSessionKey: random(256), encryptedMessage: random(32), messageIv: random(12), ...override };
     const form = new FormData();
     for (const [k, v] of Object.entries(fields)) if (v !== undefined) form.append(k, v);
     for (const [k, v] of extra) form.append(k, v);
-    for (let i = 0; i < files; i++) form.append('files', new Blob([random(60)]), 'encrypted.bin');
+    for (let i = 0; i < files; i++) form.append('files', new Blob([bodySize === undefined ? random(60) : new Uint8Array(bodySize)]), 'encrypted.bin');
     return form;
 }
 
@@ -62,7 +62,10 @@ test('drops with malformed crypto fields are refused and leave nothing behind', 
         'missing session key': [{ encryptedSessionKey: undefined }],
         'IV wrong size': [{ messageIv: random(16) }],
         'message not base64': [{ encryptedMessage: 'hello world' }],
-        'sender name repeated': [{}, { extra: [['senderName', 'Eve']] }]
+        'sender name repeated': [{}, { extra: [['senderName', 'Eve']] }],
+        'unknown package format': [{ format: '3' }],
+        'format repeated': [{ format: '2' }, { extra: [['format', '2']] }],
+        'format 2 body shorter than IV and tag': [{ format: '2' }, { bodySize: 27 }]
     };
     const packagesBefore = countPackages();
     const filesBefore = listDir(dropDir()).length;
@@ -72,6 +75,14 @@ test('drops with malformed crypto fields are refused and leave nothing behind', 
     }
     assert.equal(countPackages(), packagesBefore);
     assert.equal(listDir(dropDir()).length, filesBefore);
+});
+
+test('format 2 drops are stored as format 2, down to an empty file (IV and tag only)', async () => {
+    const res = await postDrop(alice.id, dropForm({ format: '2' }, { bodySize: 28 }));
+    assert.equal(res.status, 200);
+    assert.equal(db.prepare('SELECT format FROM packages WHERE id = ?').get(res.data.packageId).format, 2);
+    const plain = await postDrop(alice.id, dropForm());
+    assert.equal(db.prepare('SELECT format FROM packages WHERE id = ?').get(plain.data.packageId).format, 1);
 });
 
 test('a drop with neither files nor a message is refused', async () => {

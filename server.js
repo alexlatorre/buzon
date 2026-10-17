@@ -306,7 +306,11 @@ function intField(value, min, max) {
 const optionalString = (value, maxLength) => value === undefined || (typeof value === 'string' && value.length <= maxLength);
 
 // RSA-OAEP session key (2048, 3072 or 4096-bit key), 12-byte GCM IV, message = ciphertext + 16-byte tag
-function dropFieldsError(body, fileCount) {
+function dropFieldsError(body, files) {
+    const fileCount = files.length;
+    if (body.format !== undefined && body.format !== '2') return 'Unknown package format';
+    // Format 2 bodies are IV (12) || ciphertext || tag (16): anything shorter cannot be a file
+    if (body.format === '2' && files.some(f => f.size < 28)) return 'Invalid file';
     if (![256, 384, 512].includes(base64Bytes(body.encryptedSessionKey))) return 'Invalid session key';
     if (base64Bytes(body.messageIv) !== 12) return 'Invalid message IV';
     const messageBytes = base64Bytes(body.encryptedMessage);
@@ -426,7 +430,8 @@ async function resolveDropTarget(req, res, next) {
 }
 
 // File names from the drop page arrive encrypted with the package session key
-const ENC_NAME_REGEX = /^enc:[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/;
+// "enc:" for format 1 packages, "enc2:" for format 2 (name and file id bound to the package key)
+const ENC_NAME_REGEX = /^enc2?:[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/;
 const UNNAMED_FILE = 'file';
 const STORED_FILE_TYPE = 'application/octet-stream';
 function parseEncryptedNames(raw) {
@@ -701,7 +706,7 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
         const files = req.files || [];
 
         // Validate every field before anything is stored or the one-time link is used
-        const fieldError = dropFieldsError(req.body, files.length);
+        const fieldError = dropFieldsError(req.body, files);
         if (fieldError) {
             removeUploadedFiles(req);
             return res.status(400).json({ error: fieldError });
@@ -730,7 +735,8 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
             }
 
             // Create the package in db
-            const packageId = await db.createPackage(userId, senderName, encryptedSessionKey, encryptedMessage, messageIv);
+            const format = req.body.format === '2' ? 2 : 1;
+            const packageId = await db.createPackage(userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format);
 
             // Register files and rename them to standard format; on any failure undo the whole package
             const encryptedNames = parseEncryptedNames(req.body.fileNames);

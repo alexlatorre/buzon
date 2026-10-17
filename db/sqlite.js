@@ -99,6 +99,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_one_time_links_user ON one_time_links(user_id, is_used);
 `);
 
+// Package format: 1 = original, 2 = AAD-bound ciphertexts and raw file bodies
+const packageCols = db.prepare("PRAGMA table_info(packages)").all();
+if (!packageCols.find(c => c.name === 'format')) {
+    db.exec("ALTER TABLE packages ADD COLUMN format INTEGER DEFAULT 1");
+}
+
 const shareCols = db.prepare("PRAGMA table_info(shares)").all();
 if (!shareCols.find(c => c.name === 'download_proof')) {
     db.exec("ALTER TABLE shares ADD COLUMN download_proof TEXT");
@@ -142,12 +148,12 @@ module.exports = {
         db.prepare('UPDATE users SET server_auth_hash = ? WHERE id = ?').run(hash, userId);
     },
 
-    createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv) => {
+    createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {
         const id = uuidv4();
         db.prepare(`
-            INSERT INTO packages (id, user_id, sender_name, encrypted_session_key, encrypted_message, message_iv)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(id, userId, senderName, encryptedSessionKey, encryptedMessage, messageIv);
+            INSERT INTO packages (id, user_id, sender_name, encrypted_session_key, encrypted_message, message_iv, format)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(id, userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format);
         return id;
     },
 

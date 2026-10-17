@@ -116,7 +116,7 @@ function updateFileList() {
 
 // Encryption and Upload
 btnSubmit.addEventListener('click', async () => {
-    const senderNameInput = document.getElementById('sender-name').value.trim() || 'Anonymous';
+    const senderNameInput = CryptoUtils.cleanSenderName(document.getElementById('sender-name').value) || 'Anonymous';
     const message = document.getElementById('message').value;
 
     if (!message && selectedFiles.length === 0) {
@@ -132,51 +132,37 @@ btnSubmit.addEventListener('click', async () => {
         const quotaData = await quotaRes.json();
 
         if (quotaRes.ok) {
-            const incomingSize = selectedFiles.reduce((acc, f) => acc + f.size, 0);
+            // Stored size: each file grows by its IV and tag (28 bytes)
+            const incomingSize = selectedFiles.reduce((acc, f) => acc + f.size + 28, 0);
             if (incomingSize > quotaData.remaining) {
                 const remainingMB = (quotaData.remaining / (1024 * 1024)).toFixed(1);
                 throw new Error(`Mailbox quota exceeded. Recipient only has ${remainingMB} MB available.`);
             }
         }
 
-        // 1. Generate AES-GCM Session Key
-        const senderName = senderNameInput;
-        const sessionKey = await CryptoUtils.generateSessionKey();
+        // 1. Encrypt everything locally (format 2: every piece bound to its role, raw file bytes)
+        showMsg(selectedFiles.length > 0 ? `Encrypting message and ${selectedFiles.length} file(s) locally...` : 'Encrypting message...', 'info');
+        const files = [];
+        for (const file of selectedFiles) {
+            files.push({ name: file.name, data: await file.arrayBuffer() });
+        }
+        const pkg = await CryptoUtils.encryptDropPackage(targetPublicKey, message, files, senderNameInput);
+        // The message carries the file list and the sender name too: say so here, not with a 400
+        if (CryptoUtils.base64ToBuffer(pkg.encryptedMessage).byteLength > CryptoUtils.DROP_V2.MAX_MESSAGE_BYTES + 16) {
+            throw new Error('The message is too long.');
+        }
 
-        // 2. Encrypt Message
-        showMsg('Encrypting message...', 'info');
-        const encodedMessage = new TextEncoder().encode(message);
-        const encryptedMessage = await CryptoUtils.encryptSymmetric(sessionKey, encodedMessage);
-
-        // 3. Encrypt the Session Key using the Target's RSA Public Key
-        showMsg('Encrypting session key via target public key...', 'info');
-        const sessionKeyRaw = await window.crypto.subtle.exportKey("raw", sessionKey);
-        const encryptedSessionKey = await CryptoUtils.encryptAsymmetric(targetPublicKey, sessionKeyRaw);
-
-        // 4. Create FormData payload
+        // 2. Only ciphertext goes to the server; file names are inside the encrypted names
         const formData = new FormData();
-        formData.append('senderName', senderName);
-        formData.append('encryptedSessionKey', encryptedSessionKey);
-        formData.append('encryptedMessage', encryptedMessage.ciphertext);
-        formData.append('messageIv', encryptedMessage.iv);
+        formData.append('format', '2');
+        formData.append('senderName', senderNameInput);
+        formData.append('encryptedSessionKey', pkg.encryptedSessionKey);
+        formData.append('encryptedMessage', pkg.encryptedMessage);
+        formData.append('messageIv', pkg.messageIv);
+        pkg.bodies.forEach(body => formData.append('files', new Blob([body], { type: 'application/octet-stream' }), 'encrypted.bin'));
+        formData.append('fileNames', JSON.stringify(pkg.names));
 
-        // 5. Encrypt all Files iteratively
-        if (selectedFiles.length > 0) {
-            showMsg(`Encrypting ${selectedFiles.length} file(s) locally...`, 'info');
-        }
-        const encryptedNames = [];
-        for (let i = 0; i < selectedFiles.length; i++) {
-            const file = selectedFiles[i];
-            const arrayBuffer = await file.arrayBuffer();
-
-            // The server only ever sees the encrypted bytes and the encrypted name
-            const { payload, encryptedName } = await CryptoUtils.encryptDropFile(sessionKey, arrayBuffer, file.name);
-            encryptedNames.push(encryptedName);
-            formData.append('files', new Blob([payload], { type: 'application/octet-stream' }), 'encrypted.bin');
-        }
-        formData.append('fileNames', JSON.stringify(encryptedNames));
-
-        // 6. Transmit to Server
+        // 3. Transmit to Server
         showMsg('Transmitting secure payload to the server...', 'info');
         const res = await fetch(`/api/drop/${targetUserId}`, {
             method: 'POST',

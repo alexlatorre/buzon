@@ -123,25 +123,21 @@ function client(base) {
         return res;
     }
 
-    // Same steps as public/drop.js
+    // Same steps as public/drop.js (format 2, through the real crypto.js)
     async function drop(linkId, publicKeyB64, files, senderName = 'Tester') {
         const publicKey = await subtle.importKey('spki', unb64(publicKeyB64), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
-        const sessionKey = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
-        const message = await aesEncrypt(sessionKey, new TextEncoder().encode('hello'));
+        const pkg = await CryptoUtils.encryptDropPackage(publicKey, 'hello',
+            files.map(f => ({ name: f.name, data: new TextEncoder().encode(f.content) })));
         const form = new FormData();
+        form.append('format', '2');
         form.append('senderName', senderName);
-        form.append('encryptedSessionKey', b64(await subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, await subtle.exportKey('raw', sessionKey))));
-        form.append('encryptedMessage', message.ciphertext);
-        form.append('messageIv', message.iv);
-        const names = [];
-        for (const f of files) {
-            const { payload, encryptedName } = await CryptoUtils.encryptDropFile(sessionKey, new TextEncoder().encode(f.content), f.name);
-            names.push(encryptedName);
-            form.append('files', new Blob([payload], { type: 'application/octet-stream' }), 'encrypted.bin');
-        }
-        form.append('fileNames', JSON.stringify(names));
+        form.append('encryptedSessionKey', pkg.encryptedSessionKey);
+        form.append('encryptedMessage', pkg.encryptedMessage);
+        form.append('messageIv', pkg.messageIv);
+        pkg.bodies.forEach(body => form.append('files', new Blob([body], { type: 'application/octet-stream' }), 'encrypted.bin'));
+        form.append('fileNames', JSON.stringify(pkg.names));
         const res = await fetch(`${base}/api/drop/${linkId}`, { method: 'POST', body: form });
-        return { status: res.status, data: await res.json().catch(() => null), sessionKey };
+        return { status: res.status, data: await res.json().catch(() => null), sessionKey: pkg.sessionKey };
     }
 
     // Field sizes match public/app.js: wrapped AES-256 key (32 + 16 tag), 12-byte IVs, 16-byte salt

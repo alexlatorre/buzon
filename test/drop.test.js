@@ -37,15 +37,17 @@ test('drop stores the package with encrypted file names', async () => {
     const pkg = pkgs.data[0];
     assert.equal(pkg.sender_name, '<b>Bob</b>');
     const stored = pkg.files[0].original_name;
-    assert.match(stored, /^enc:/);
+    assert.match(stored, /^enc2:/);
     assert.ok(!stored.includes('secreto'));
-    assert.equal(await CryptoUtils.decryptDropName(drop.sessionKey, stored), 'secreto.txt');
+    assert.equal((await CryptoUtils.decryptDropEntry(drop.sessionKey, stored)).name, 'secreto.txt');
+    assert.equal(pkg.format, 2);
 
     // Neither the file on disk nor the DB row carries the name or a real type in clear text
-    const onDisk = fs.readFileSync(path.join(dropDir(), `${pkg.id}_${pkg.files[0].id}`), 'utf8');
-    assert.ok(!onDisk.includes('secreto'), 'stored file leaks the name');
-    assert.ok(!onDisk.includes('text/plain'), 'stored file leaks the type');
-    assert.deepEqual(Object.keys(JSON.parse(onDisk)).sort(), ['ciphertext', 'iv']);
+    const onDisk = fs.readFileSync(path.join(dropDir(), `${pkg.id}_${pkg.files[0].id}`));
+    assert.equal(onDisk.includes(Buffer.from('secreto')), false, 'stored file leaks the name');
+    assert.equal(onDisk.includes(Buffer.from('text/plain')), false, 'stored file leaks the type');
+    assert.equal(onDisk.length, 'top secret'.length + 28, 'raw IV + ciphertext + tag, no base64');
+    assert.equal(pkg.files[0].size, onDisk.length);
     assert.equal(pkg.files[0].mime_type, 'application/octet-stream');
 });
 

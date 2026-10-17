@@ -49,6 +49,7 @@ test('drops, inbox, download and quota', { skip }, async () => {
     assert.equal(drop.status, 200, JSON.stringify(drop.data));
     const pkgs = (await api.json('GET', `/api/packages/${alice.id}`, null, aliceToken)).data;
     assert.equal(pkgs.length, 1);
+    assert.equal(Number(pkgs[0].format), 2);
     const file = await fetch(`${server.base}/api/package/${pkgs[0].id}/file/${pkgs[0].files[0].id}`, { headers: { Authorization: `Bearer ${aliceToken}` } });
     assert.equal(file.status, 200);
     const quota = (await api.json('GET', `/api/user/${alice.id}/config`, null, aliceToken)).data;

@@ -257,6 +257,7 @@ function secureLogout() {
         document.getElementById('modal-sender').textContent = '';
         document.getElementById('modal-date').textContent = '';
         document.getElementById('modal-message').textContent = '';
+        showPackageWarning(null);
         document.getElementById('modal-files').replaceChildren();
         pkgList.replaceChildren();
         otlListUI.replaceChildren();
@@ -364,18 +365,13 @@ async function openPackage(id) {
 
     selectedPackage = pkg;
     try {
-        // 1. Decrypt Session Key using RSA Private Key
-        const sessionKeyBuffer = await CryptoUtils.decryptAsymmetric(currentUser.privateKey, pkg.encrypted_session_key);
-        // 2. Import Session Key
-        const sessionKeyBase64 = CryptoUtils.bufferToBase64(sessionKeyBuffer);
-        currentPackageSessionKey = await CryptoUtils.importSessionKey(sessionKeyBase64);
+        // 1-3. Unwrap the session key and decrypt the message (and, in format 2, the file manifest)
+        const opened = await CryptoUtils.openDropPackage(currentUser.privateKey, pkg);
+        currentPackageSessionKey = opened.sessionKey;
+        const message = opened.text;
 
-        // 3. Decrypt Message using Session Key
-        const msgBuffer = await CryptoUtils.decryptSymmetric(currentPackageSessionKey, pkg.encrypted_message, pkg.message_iv);
-        const message = new TextDecoder().decode(msgBuffer);
-
-        // 4. Fill Modal
-        document.getElementById('modal-sender').textContent = pkg.sender_name || 'Anonymous';
+        // 4. Fill Modal (format 2: the sender name sealed in the package, not the one the server lists)
+        document.getElementById('modal-sender').textContent = opened.sender ?? (pkg.sender_name || 'Anonymous');
         document.getElementById('modal-date').textContent = formatDateTime(parseServerDate(pkg.created_at), true);
         document.getElementById('modal-message').textContent = message;
 
@@ -387,7 +383,9 @@ async function openPackage(id) {
             btnDownloadAll.style.display = 'none';
         } else {
             for (const f of pkg.files) {
-                f.displayName = await decryptFileName(f.original_name);
+                const entry = await CryptoUtils.decryptDropEntry(currentPackageSessionKey, f.original_name, opened.format);
+                f.displayName = entry.name;
+                f.fileId = entry.id;
             }
             pkg.files.forEach(f => {
                 const li = document.createElement('li');
@@ -418,6 +416,9 @@ async function openPackage(id) {
             btnDownloadAll.textContent = 'Decrypt & Download All';
         }
 
+        // Format 2: the files and sender name the server lists must match the ones sealed by the sender
+        showPackageWarning(CryptoUtils.packageWarning(opened, pkg.files.map(f => f.fileId), pkg.sender_name));
+
         modal.classList.remove('hidden');
 
     } catch (error) {
@@ -425,6 +426,7 @@ async function openPackage(id) {
         // otherwise it would sit in the inbox and count against the quota for good
         console.error(error);
         currentPackageSessionKey = null;
+        showPackageWarning(null);
         document.getElementById('modal-sender').textContent = pkg.sender_name || 'Anonymous';
         document.getElementById('modal-date').textContent = formatDateTime(parseServerDate(pkg.created_at), true);
         document.getElementById('modal-message').textContent =
@@ -508,7 +510,7 @@ async function downloadFile(f) {
         });
         if (!res.ok) throw new Error('Download failed');
 
-        const decryptedBuffer = await CryptoUtils.decryptDropFile(currentPackageSessionKey, await res.text());
+        const decryptedBuffer = await CryptoUtils.decryptDropBody(currentPackageSessionKey, await res.arrayBuffer(), selectedPackage.format, f.fileId);
 
         // Save under the decrypted name shown in the inbox, never under a name or type taken from the
         // stored payload, and with a neutral type so the browser never renders the file itself
@@ -529,10 +531,11 @@ async function downloadFile(f) {
     }
 }
 
-// Drop pages send file names encrypted with the package session key ("enc:<iv>:<ciphertext>");
-// older packages still have them in clear text
-async function decryptFileName(storedName) {
-    return CryptoUtils.decryptDropName(currentPackageSessionKey, storedName);
+// Shown apart from the message, so the sender's text can neither hide it nor imitate it
+function showPackageWarning(text) {
+    const el = document.getElementById('modal-warning');
+    el.textContent = text ? `⚠ ${text}` : '';
+    el.classList.toggle('hidden', !text);
 }
 
 async function downloadFiles() {

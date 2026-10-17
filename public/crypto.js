@@ -226,29 +226,157 @@ const CryptoUtils = {
         return match ? match[1] : false;
     },
 
-    // Drop attachments: the stored payload holds only the encrypted bytes and their IV. The name
-    // travels separately as "enc:<iv>:<ciphertext>" and the type is never sent, so nothing readable
-    // about the file reaches the server.
-    encryptDropFile: async function (sessionKey, fileBuffer, fileName) {
-        const body = await this.encryptSymmetric(sessionKey, fileBuffer);
-        // Pad the name with NULs to a multiple of 256 bytes so its ciphertext does not reveal its length
-        const nameBytes = new TextEncoder().encode(fileName);
-        const paddedName = new Uint8Array(Math.max(256, Math.ceil(nameBytes.length / 256) * 256));
-        paddedName.set(nameBytes);
-        const name = await this.encryptSymmetric(sessionKey, paddedName);
+    // --- Drop packages, format 2 ---
+    // Every AES-GCM ciphertext is bound to its role with associated data, so a server cannot move a
+    // message, a name or a file body into another slot: the message carries a manifest of random file
+    // ids, each name carries its file's id, and each body is bound to that id. Bodies travel as raw
+    // bytes (IV || ciphertext), not base64. Format 1 packages (no AAD, JSON bodies) still open.
+    DROP_V2: {
+        SESSION_KEY_LABEL: "shadowdrop/drop/v2/session-key",
+        MESSAGE: "shadowdrop/drop/v2/message",
+        NAME: "shadowdrop/drop/v2/name",
+        BODY: "shadowdrop/drop/v2/body/",
+        MAX_FILES: 20, // same as the server's MAX_DROP_FILES
+        MAX_MESSAGE_BYTES: 256 * 1024 // same as the server's MAX_MESSAGE_BYTES
+    },
+
+    // The sender name the way the server stores it (control characters removed, 64 characters), so the
+    // copy sealed in the message can be compared with the one the inbox lists
+    cleanSenderName: function (name) {
+        return String(name ?? "").replace(/[\x00-\x1f\x7f]/g, "").trim().substring(0, 64);
+    },
+
+    aesGcmEncrypt: async function (key, data, aad) {
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const ciphertext = await window.crypto.subtle.encrypt(
+            { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) }, key, data);
+        return { iv, ciphertext: new Uint8Array(ciphertext) };
+    },
+
+    aesGcmDecrypt: async function (key, iv, ciphertext, aad) {
+        return window.crypto.subtle.decrypt(
+            { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) }, key, ciphertext);
+    },
+
+    // Pads with NULs to a multiple of 256 bytes so a ciphertext does not reveal the name's length
+    padTo256: function (bytes) {
+        const padded = new Uint8Array(Math.max(256, Math.ceil(bytes.length / 256) * 256));
+        padded.set(bytes);
+        return padded;
+    },
+
+    randomId: function () {
+        return this.bufferToBase64(window.crypto.getRandomValues(new Uint8Array(16))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    },
+
+    // Sender side: everything the server stores for one package. files: [{ name, data: ArrayBuffer }];
+    // sender: the name the sender typed, sealed in the message so the server cannot change it unnoticed
+    encryptDropPackage: async function (publicKey, text, files, sender) {
+        const encoder = new TextEncoder();
+        const sessionKey = await this.generateSessionKey();
+        const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
+        const wrapped = await window.crypto.subtle.encrypt(
+            { name: "RSA-OAEP", label: encoder.encode(this.DROP_V2.SESSION_KEY_LABEL) }, publicKey, rawKey);
+
+        const ids = files.map(() => this.randomId());
+        const message = await this.aesGcmEncrypt(sessionKey, encoder.encode(JSON.stringify({ text, sender: sender === undefined ? null : this.cleanSenderName(sender), files: ids })), this.DROP_V2.MESSAGE);
+
+        const names = [];
+        const bodies = [];
+        for (let i = 0; i < files.length; i++) {
+            const name = await this.aesGcmEncrypt(sessionKey,
+                this.padTo256(encoder.encode(JSON.stringify({ name: files[i].name, id: ids[i] }))), this.DROP_V2.NAME);
+            names.push(`enc2:${this.bufferToBase64(name.iv)}:${this.bufferToBase64(name.ciphertext)}`);
+            const body = await this.aesGcmEncrypt(sessionKey, files[i].data, this.DROP_V2.BODY + ids[i]);
+            const blob = new Uint8Array(12 + body.ciphertext.length);
+            blob.set(body.iv, 0);
+            blob.set(body.ciphertext, 12);
+            bodies.push(blob);
+        }
         return {
-            payload: JSON.stringify({ ciphertext: body.ciphertext, iv: body.iv }),
-            encryptedName: `enc:${name.iv}:${name.ciphertext}`
+            format: 2,
+            sessionKey,
+            encryptedSessionKey: this.bufferToBase64(wrapped),
+            encryptedMessage: this.bufferToBase64(message.ciphertext),
+            messageIv: this.bufferToBase64(message.iv),
+            names,
+            bodies
         };
     },
 
-    decryptDropFile: async function (sessionKey, payloadText) {
-        const payload = JSON.parse(payloadText);
+    // Recipient side: session key and message of a package; fileIds is the sender's manifest and
+    // sender the sealed sender name (both null for format 1, which has neither)
+    openDropPackage: async function (privateKey, pkg) {
+        const format = Number(pkg.format) === 2 ? 2 : 1;
+        const params = format === 2
+            ? { name: "RSA-OAEP", label: new TextEncoder().encode(this.DROP_V2.SESSION_KEY_LABEL) }
+            : { name: "RSA-OAEP" };
+        const rawKey = await window.crypto.subtle.decrypt(params, privateKey, this.base64ToBuffer(pkg.encrypted_session_key));
+        const sessionKey = await this.importSessionKey(this.bufferToBase64(rawKey));
+        if (format === 1) {
+            const text = new TextDecoder().decode(await this.decryptSymmetric(sessionKey, pkg.encrypted_message, pkg.message_iv));
+            return { format, sessionKey, text, sender: null, fileIds: null };
+        }
+        const plain = await this.aesGcmDecrypt(sessionKey, this.base64ToBuffer(pkg.message_iv),
+            this.base64ToBuffer(pkg.encrypted_message), this.DROP_V2.MESSAGE);
+        const { text, sender = null, files } = JSON.parse(new TextDecoder().decode(plain));
+        if (typeof text !== "string" || (sender !== null && typeof sender !== "string")
+            || !Array.isArray(files) || files.length > this.DROP_V2.MAX_FILES || files.some(id => typeof id !== "string")) {
+            throw new Error("Malformed package");
+        }
+        return { format, sessionKey, text, sender, fileIds: files };
+    },
+
+    // Name and id of a stored file: "enc2:" (format 2), "enc:" (format 1) or a pre-encryption name.
+    // In a format 2 package anything but "enc2:" was not written by the sender and is not shown
+    decryptDropEntry: async function (sessionKey, storedName, format) {
+        const match = /^enc2:([A-Za-z0-9+/]+=*):([A-Za-z0-9+/]+=*)$/.exec(String(storedName || ""));
+        if (!match && Number(format) === 2) return { name: "encrypted-file", id: null };
+        if (!match) return { name: await this.decryptDropName(sessionKey, storedName), id: null };
+        try {
+            const plain = await this.aesGcmDecrypt(sessionKey, this.base64ToBuffer(match[1]),
+                this.base64ToBuffer(match[2]), this.DROP_V2.NAME);
+            const entry = JSON.parse(new TextDecoder().decode(plain).replace(/\0+$/, ""));
+            return { name: this.cleanFileName(String(entry.name)), id: String(entry.id) };
+        } catch (e) {
+            return { name: "encrypted-file", id: null };
+        }
+    },
+
+    // Format 2: files the server lists vs the sender's encrypted manifest. Counts files the sender
+    // attached that are missing, and files listed that the sender did not attach (or listed twice).
+    manifestProblems: function (fileIds, listedIds) {
+        if (!fileIds) return { missing: 0, unexpected: 0 };
+        return {
+            missing: fileIds.filter(id => !listedIds.includes(id)).length,
+            unexpected: listedIds.filter((id, i) => !id || !fileIds.includes(id) || listedIds.indexOf(id) !== i).length
+        };
+    },
+
+    // Format 2: what the server lists against what was sealed in the package. Worded neutrally: the
+    // sender writes the manifest too, so a mismatch does not say who changed what
+    packageWarning: function (opened, listedIds, listedSender) {
+        if (!opened.fileIds) return null;
+        const { missing, unexpected } = this.manifestProblems(opened.fileIds, listedIds);
+        const parts = [];
+        if (missing) parts.push(`${missing} attachment(s) in the sealed list are missing`);
+        if (unexpected) parts.push(`${unexpected} attachment(s) are not in the sealed list`);
+        if (opened.sender !== null && opened.sender !== (listedSender || "")) parts.push("the sender name listed in the inbox is not the sealed one");
+        return parts.length ? `This package does not match what was sealed when it was sent: ${parts.join("; ")}.` : null;
+    },
+
+    // Decrypted bytes of a stored file body
+    decryptDropBody: async function (sessionKey, bodyBuffer, format, fileId) {
+        if (Number(format) === 2) {
+            const bytes = new Uint8Array(bodyBuffer);
+            if (!fileId || bytes.length < 28) throw new Error("Malformed file");
+            return this.aesGcmDecrypt(sessionKey, bytes.slice(0, 12), bytes.slice(12), this.DROP_V2.BODY + fileId);
+        }
+        const payload = JSON.parse(new TextDecoder().decode(bodyBuffer));
         return this.decryptSymmetric(sessionKey, payload.ciphertext, payload.iv);
     },
 
-    // Name shown in the inbox and used for the download. Encrypted names are "enc:<iv>:<ciphertext>";
-    // anything else was stored before names were encrypted.
+    // Format 1 names: "enc:<iv>:<ciphertext>"; anything else was stored before names were encrypted
     decryptDropName: async function (sessionKey, storedName) {
         const match = /^enc:([A-Za-z0-9+/]+=*):([A-Za-z0-9+/]+=*)$/.exec(String(storedName || ""));
         let name;
