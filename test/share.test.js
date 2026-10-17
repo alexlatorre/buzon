@@ -61,9 +61,38 @@ test('shares count towards the storage quota', async () => {
     }
 });
 
+test('another user cannot delete a share file by changing the token case', async () => {
+    // On case-insensitive filesystems (Windows, macOS, Docker Desktop mounts) an uppercase token used to
+    // miss the DB row, skip the ownership check and still unlink the owner's file
+    const { data } = await api.share(alice.id, alice.token);
+    const file = path.join(server.dataDir, 'shares', `${data.token}.enc`);
+    const res = await api.json('DELETE', `/api/share/${data.token.toUpperCase()}`, null, bob.token);
+    assert.notEqual(res.status, 200);
+    assert.equal(fs.existsSync(file), true);
+    assert.equal((await api.json('GET', `/api/share/${data.token}/meta`)).status, 200);
+    assert.equal((await fetch(`${server.base}/api/share/${data.token}/download`)).status, 200);
+});
+
+test('ids are accepted only in the lowercase form the server issues', async () => {
+    const { data } = await api.share(alice.id, alice.token);
+    const upper = data.token.toUpperCase();
+    assert.equal((await api.json('GET', `/api/share/${upper}/meta`)).status, 400);
+    assert.equal((await api.json('DELETE', `/api/share/${upper}`, null, alice.token)).status, 400);
+    assert.equal((await api.json('DELETE', `/api/share/${data.token}`, null, alice.token)).status, 200);
+});
+
+test('deleting a share that does not exist or is not yours looks the same', async () => {
+    const { data } = await api.share(alice.id, alice.token);
+    const missing = await api.json('DELETE', '/api/share/00000000-0000-4000-8000-000000000000', null, bob.token);
+    const notYours = await api.json('DELETE', `/api/share/${data.token}`, null, bob.token);
+    assert.equal(missing.status, 404);
+    assert.equal(notYours.status, 404);
+    assert.deepEqual(notYours.data, missing.data);
+});
+
 test('only the owner can delete a share', async () => {
     const { data } = await api.share(alice.id, alice.token);
-    assert.equal((await api.json('DELETE', `/api/share/${data.token}`, null, bob.token)).status, 403);
+    assert.equal((await api.json('DELETE', `/api/share/${data.token}`, null, bob.token)).status, 404);
     assert.equal((await api.json('DELETE', `/api/share/${data.token}`, null, alice.token)).status, 200);
     assert.equal(fs.existsSync(path.join(server.dataDir, 'shares', `${data.token}.enc`)), false);
 });

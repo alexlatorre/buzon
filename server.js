@@ -121,7 +121,9 @@ function requireAuth(req, res, next) {
 }
 
 // UUID format validator
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Lowercase only: the server issues lowercase ids, and an uppercase variant could miss a DB row
+// while still naming the same file on a case-insensitive filesystem
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 function isValidUUID(str) {
     return UUID_REGEX.test(str);
 }
@@ -594,19 +596,18 @@ app.delete('/api/package/:packageId', requireAuth, async (req, res) => {
         }
         const pkg = await db.getPackageById(packageId);
 
-        // Verify ownership
-        if (pkg && pkg.user_id !== req.session.userId) {
-            return res.status(403).json({ error: 'Forbidden' });
+        // Same 404 for "not yours" and "does not exist"; never touch the disk without an owned row
+        if (!pkg || pkg.user_id !== req.session.userId) {
+            return res.status(404).json({ error: 'Package not found' });
         }
 
-        if (pkg && pkg.files) {
-            pkg.files.forEach(f => {
-                const filePath = path.join(DROP_DIR, `${packageId}_${f.id}`);
-                try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
-            });
-        }
+        // File paths come from the stored row, never from the request
+        pkg.files.forEach(f => {
+            const filePath = path.join(DROP_DIR, `${pkg.id}_${f.id}`);
+            try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
+        });
 
-        await db.deletePackage(packageId);
+        await db.deletePackage(pkg.id);
         res.json({ success: true });
     } catch (error) {
         console.error('Delete error:', error);
@@ -746,13 +747,13 @@ app.get('/api/share/:token/download', async (req, res) => {
             return res.status(410).json({ error: 'Download limit reached' });
         }
 
-        const filePath = path.join(SHARE_DIR, `${req.params.token}.enc`);
+        const filePath = path.join(SHARE_DIR, `${share.token}.enc`);
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({ error: 'File not found on disk' });
         }
 
         // Count the download atomically; fails if a concurrent request took the last one
-        if (!(await db.incrementShareDownloads(req.params.token))) {
+        if (!(await db.incrementShareDownloads(share.token))) {
             return res.status(410).json({ error: 'Download limit reached' });
         }
 
@@ -784,14 +785,15 @@ app.delete('/api/share/:token', requireAuth, async (req, res) => {
         if (!isValidUUID(token)) {
             return res.status(400).json({ error: 'Invalid token format' });
         }
-        // Verify ownership
+        // Same 404 for "not yours" and "does not exist"; never touch the disk without an owned row
         const share = await db.getShareByToken(token);
-        if (share && share.user_id !== req.session.userId) {
-            return res.status(403).json({ error: 'Forbidden' });
+        if (!share || share.user_id !== req.session.userId) {
+            return res.status(404).json({ error: 'Share not found' });
         }
-        const filePath = path.join(SHARE_DIR, `${token}.enc`);
+        // The file path comes from the stored token, never from the request
+        const filePath = path.join(SHARE_DIR, `${share.token}.enc`);
         try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
-        await db.deleteShare(token);
+        await db.deleteShare(share.token);
         res.json({ success: true });
     } catch (error) {
         console.error('Delete share error:', error);

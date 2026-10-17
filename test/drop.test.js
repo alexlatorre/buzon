@@ -77,7 +77,10 @@ test('only the owner can download a package file', async () => {
 
 test('only the owner can delete a package', async () => {
     const pkg = (await api.json('GET', `/api/packages/${alice.id}`, null, alice.token)).data[0];
-    assert.equal((await api.json('DELETE', `/api/package/${pkg.id}`, null, bob.token)).status, 403);
+    assert.equal((await api.json('DELETE', `/api/package/${pkg.id}`, null, bob.token)).status, 404);
+    assert.equal((await api.json('DELETE', `/api/package/${pkg.id.toUpperCase()}`, null, bob.token)).status, 400);
+    assert.equal((await api.json('DELETE', '/api/package/00000000-0000-4000-8000-000000000000', null, alice.token)).status, 404);
+    assert.equal(fs.existsSync(path.join(dropDir(), `${pkg.id}_${pkg.files[0].id}`)), true);
     assert.equal((await api.json('GET', `/api/packages/${alice.id}`, null, alice.token)).data.length, 1);
 });
 
