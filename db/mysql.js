@@ -285,6 +285,11 @@ module.exports = {
         await pool.execute('UPDATE shares SET download_count = download_count - 1 WHERE token = ? AND download_count > 0', [token]);
     },
 
+    getAllPackageDates: async () => {
+        const [rows] = await pool.execute('SELECT id, created_at FROM packages');
+        return rows;
+    },
+
     getAllShareLimits: async () => {
         const [rows] = await pool.execute('SELECT token, max_downloads, download_count, expires_at FROM shares');
         return rows;

@@ -42,7 +42,7 @@ https://gallifrey.sytes.net/
 ### 3. Reading packages
 - Packages appear in your inbox. Opening one decrypts the message, the file names and the files in your browser.
 - Download files one by one or all at once; original names and types are restored.
-- **Destroy Package** deletes it permanently from the server.
+- **Destroy Package** deletes it permanently from the server. Packages you do not destroy are deleted automatically after 30 days.
 
 ### 4. Secure file sharing
 - Click **📤 Share File**, drop a file, set an **unlock password** and, optionally, an encrypted note.
@@ -135,6 +135,7 @@ All settings are environment variables; nothing secret lives in the repository.
 | `AUTH_RATE_LIMIT` | `20` | Auth requests per IP every 15 minutes. |
 | `API_RATE_LIMIT` | `200` | Other API requests per IP every 15 minutes (login has its own limit). |
 | `REQUEST_TIMEOUT_MS` | `1800000` (30 min) | Time allowed for a whole request; raise it for very large uploads over slow links. |
+| `PACKAGE_RETENTION_DAYS` | `30` | Pending packages older than this are deleted with their files by the hourly cleanup; `0` keeps them until the owner destroys them. |
 | `ORPHAN_GRACE_MS` | `3600000` (1 h) | Age after which upload files with no database row are deleted by the hourly cleanup. |
 
 ### TLS certificates
@@ -267,7 +268,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 ## Guía rápida
 1. **Registro**: elige usuario y contraseña maestra. **Si la pierdes, nadie puede recuperar tus datos.**
 2. **Recibir**: comparte tu enlace público o genera enlaces de un solo uso (sirven para un único envío).
-3. **Leer**: los paquetes, sus mensajes y los nombres de los ficheros se descifran en tu navegador. **Destroy Package** los borra del servidor.
+3. **Leer**: los paquetes, sus mensajes y los nombres de los ficheros se descifran en tu navegador. **Destroy Package** los borra del servidor; los que no borres se eliminan solos a los 30 días.
 4. **Compartir ficheros**: 📤 Share File → arrastra el fichero, pon una contraseña y, si quieres, caducidad y límite de descargas. Envía el enlace y, por otro canal, la contraseña. Los enlaces caducados o agotados se borran solos cada hora.
 
 ## Seguridad

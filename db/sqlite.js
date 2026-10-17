@@ -237,6 +237,10 @@ module.exports = {
         db.prepare('UPDATE shares SET download_count = download_count - 1 WHERE token = ? AND download_count > 0').run(token);
     },
 
+    getAllPackageDates: async () => {
+        return db.prepare('SELECT id, created_at FROM packages').all();
+    },
+
     getAllShareLimits: async () => {
         return db.prepare('SELECT token, max_downloads, download_count, expires_at FROM shares').all();
     },

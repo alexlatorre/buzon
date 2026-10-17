@@ -1093,8 +1093,30 @@ async function sweepOrphanFiles() {
     }
 }
 
+// Pending packages expire so a drop link cannot be used to fill a mailbox for good.
+// PACKAGE_RETENTION_DAYS=0 keeps them until the owner destroys them.
+const PACKAGE_RETENTION_DAYS = process.env.PACKAGE_RETENTION_DAYS === undefined ? 30 : Number(process.env.PACKAGE_RETENTION_DAYS);
+
+async function purgeExpiredPackages() {
+    if (!(PACKAGE_RETENTION_DAYS > 0)) return;
+    try {
+        const cutoff = Date.now() - PACKAGE_RETENTION_DAYS * 24 * 3600 * 1000;
+        for (const pkg of await db.getAllPackageDates()) {
+            if (storedDate(pkg.created_at) >= cutoff) continue;
+            const full = await db.getPackageById(pkg.id);
+            for (const f of (full && full.files) || []) {
+                try { fs.unlinkSync(path.join(DROP_DIR, `${pkg.id}_${f.id}`)); } catch { }
+            }
+            await db.deletePackage(pkg.id);
+        }
+    } catch (error) {
+        console.error('Package expiry error:', error);
+    }
+}
+
 async function housekeeping() {
     await purgeDeadShares();
+    await purgeExpiredPackages();
     await sweepOrphanFiles();
 }
 setTimeout(housekeeping, Number(process.env.HOUSEKEEPING_DELAY_MS) || 10 * 1000);
