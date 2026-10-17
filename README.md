@@ -132,6 +132,9 @@ All settings are environment variables; nothing secret lives in the repository.
 | `TLS` | *(on)* | `off` forces plain HTTP even if certificates exist (TLS terminated by a proxy). |
 | `TRUST_PROXY` | `1` with `TLS=off`, otherwise `false` | Express `trust proxy` setting: the number of proxies in front of the app, or `false`. Only set it when a proxy really sits in front, otherwise clients can forge `X-Forwarded-For` and bypass rate limits. `true` is refused at startup. |
 | `AUTH_RATE_LIMIT` | `20` | Auth requests per IP every 15 minutes. |
+| `API_RATE_LIMIT` | `200` | Other API requests per IP every 15 minutes (login has its own limit). |
+| `REQUEST_TIMEOUT_MS` | `1800000` (30 min) | Time allowed for a whole request; raise it for very large uploads over slow links. |
+| `ORPHAN_GRACE_MS` | `3600000` (1 h) | Age after which upload files with no database row are deleted by the hourly cleanup. |
 
 ### TLS certificates
 The server looks for, in order: `certs/fullchain.pem` + `certs/privkey.pem`, `fullchain.pem` + `privkey.pem`, `cert.pem` + `key.pem`. If none are found (or `TLS=off`) it serves HTTP, which is the right setup behind a reverse proxy that handles TLS. Certificates and keys are git-ignored.

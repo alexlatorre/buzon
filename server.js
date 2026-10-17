@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
@@ -1063,9 +1064,20 @@ function findSSLCerts() {
     return null;
 }
 
+// Time budget for a whole request. Node's default (5 min) cut off legitimate large uploads on slow
+// links; a drop can be up to 20 x 50 MB, so the default here allows 30 min. Headers must still
+// arrive quickly, and stalled connections are checked often enough for the limit to apply.
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS) || 30 * 60 * 1000;
+const serverOptions = {
+    requestTimeout: REQUEST_TIMEOUT_MS,
+    headersTimeout: Math.min(60 * 1000, REQUEST_TIMEOUT_MS),
+    connectionsCheckingInterval: Math.min(30 * 1000, Math.max(250, Math.floor(REQUEST_TIMEOUT_MS / 4)))
+};
+
 if (sslCerts) {
     try {
         const options = {
+            ...serverOptions,
             key: fs.readFileSync(sslCerts.key),
             cert: fs.readFileSync(sslCerts.cert)
         };
@@ -1076,13 +1088,13 @@ if (sslCerts) {
     } catch (err) {
         console.error('SSL certificate error:', err.message);
         console.log('Falling back to HTTP...');
-        app.listen(PORT, () => {
+        http.createServer(serverOptions, app).listen(PORT, () => {
             console.log(`Buzon HTTP server running at http://localhost:${PORT}`);
         });
     }
 } else {
     // Fallback to HTTP for dev or if running behind a proxy
-    app.listen(PORT, () => {
+    http.createServer(serverOptions, app).listen(PORT, () => {
         console.log(`Buzon HTTP server running at http://localhost:${PORT}`);
     });
 }
