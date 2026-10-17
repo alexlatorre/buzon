@@ -104,7 +104,7 @@ Be clear about what Shadow Drop protects against:
 
 ## 📦 Installation
 
-Requirements: **Node.js 20+** and **HTTPS** in front of users (the Web Crypto API only works in secure contexts; `localhost` is fine for development).
+Requirements: **Node.js 22+** (the Docker image uses Node 24 LTS) and **HTTPS** in front of users (the Web Crypto API only works in secure contexts; `localhost` is fine for development).
 
 ```bash
 npm install
@@ -223,7 +223,7 @@ The suite (`test/`, Node's built-in test runner, no extra dependencies) starts r
   - `integrity.js` – Client-side integrity check.
   - `about.html` – Security explanation page.
 - `test/` – Automated tests (`npm test`).
-- `Dockerfile` – Node 20 Alpine image, runs as `node`.
+- `Dockerfile` – Node 24 Alpine image, runs as `node`.
 - `LICENSE` – AGPL-3.0.
 
 ---

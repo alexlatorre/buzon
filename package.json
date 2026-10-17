@@ -12,6 +12,9 @@
     "keywords": [],
     "author": "",
     "license": "AGPL-3.0-only",
+    "engines": {
+        "node": ">=22"
+    },
     "dependencies": {
         "better-sqlite3": "^12.6.2",
         "express": "^5.2.1",
