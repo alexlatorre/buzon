@@ -244,7 +244,7 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 | `index.html` | `4e43db093b5218ad8e822baf0ae0d81363e75df688efc984b9c932a86c78ef55` |
 | `about.html` | `5eea32319dfd255efd0eab6c8816c835e577adccbc0ed14a5e50599ebfc4b1e6` |
 | `drop.html` | `23e6cd33fce3d27d050f855b17880eae32f4e9dc67d32a5e951c93f800f7f7cd` |
-| `share.html` | `b7ebc86f67b7e5d41d499e895a78e8820d1f6ccb573d627f5e82d6b44b6539b4` |
+| `share.html` | `327917ca6c4f8e137a34d95ec7f8ea65a838da3f049505aa048ced13f8636ef6` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
