@@ -922,6 +922,11 @@ input:checked + .slider:before {
   transition: width 0.3s ease, background 0.3s ease;
 }
 
+/* label shares the level class with the bar fill: keep only its text colour */
+.pw-strength .pw-strength-label {
+  background: none;
+}
+
 .pw-strength-label {
   font-size: 0.6875rem;
   font-weight: 600;

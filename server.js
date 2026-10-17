@@ -32,11 +32,69 @@ function destroySession(token) {
     sessions.delete(token);
 }
 
-// Cleanup expired sessions every hour
+// --- Auth Hash Helpers ---
+// The DB stores sha256(serverAuthHash), so a leaked DB can't be replayed to log in
+const AUTH_HASH_PREFIX = 'sha256:';
+const LEGACY_AUTH_MARKER = 'LEGACY_MIGRATION_REQUIRED';
+
+function hashAuthToken(value) {
+    return AUTH_HASH_PREFIX + crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+function safeEqual(a, b) {
+    const bufA = Buffer.from(String(a));
+    const bufB = Buffer.from(String(b));
+    return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+}
+
+function verifyAuthHash(stored, provided) {
+    if (stored.startsWith(AUTH_HASH_PREFIX)) return safeEqual(stored, hashAuthToken(provided));
+    // Rows written before hashing was introduced; upgraded on the next successful login
+    return safeEqual(stored, provided);
+}
+
+// Fake salts for unknown usernames: deterministic per username and indistinguishable from real ones
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+const SALT_SECRET_PATH = path.join(DATA_DIR, '.salt_secret');
+
+function loadSaltSecret() {
+    if (fs.existsSync(SALT_SECRET_PATH)) return fs.readFileSync(SALT_SECRET_PATH);
+    const secret = crypto.randomBytes(32);
+    fs.writeFileSync(SALT_SECRET_PATH, secret, { mode: 0o600 });
+    return secret;
+}
+const saltSecret = loadSaltSecret();
+
+function fakeSaltFor(username) {
+    return crypto.createHmac('sha256', saltSecret).update(username).digest().subarray(0, 16).toString('base64');
+}
+
+// Legacy accounts (no auth hash yet) must prove they hold the private key before a hash is accepted
+const migrationChallenges = new Map(); // userId -> { nonce, expiresAt }
+const CHALLENGE_TTL = 5 * 60 * 1000;
+
+function createMigrationChallenge(user) {
+    const nonce = crypto.randomBytes(32);
+    const publicKey = crypto.createPublicKey({ key: Buffer.from(user.public_key, 'base64'), format: 'der', type: 'spki' });
+    const encrypted = crypto.publicEncrypt(
+        { key: publicKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+        nonce
+    );
+    migrationChallenges.set(user.id, { nonce: nonce.toString('base64'), expiresAt: Date.now() + CHALLENGE_TTL });
+    return encrypted.toString('base64');
+}
+
+// Cleanup expired sessions and challenges every hour
 setInterval(() => {
     const now = Date.now();
     for (const [token, session] of sessions) {
         if (now - session.createdAt > SESSION_TTL) sessions.delete(token);
+    }
+    for (const [userId, challenge] of migrationChallenges) {
+        if (challenge.expiresAt < now) migrationChallenges.delete(userId);
     }
 }, 60 * 60 * 1000);
 
@@ -84,20 +142,29 @@ computeFileHashes();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+// TLS=off forces plain HTTP (TLS terminated by a reverse proxy, or tests)
+const sslCerts = process.env.TLS === 'off' ? null : findSSLCerts();
+
+// Only trust X-Forwarded-For when a reverse proxy sits in front. Serving HTTPS directly,
+// clients could forge the header and dodge the rate limiters. TRUST_PROXY overrides the default.
+function parseTrustProxy(value) {
+    if (value === undefined || value === '') return sslCerts ? false : 1;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (/^\d+$/.test(value)) return Number(value);
+    return value;
+}
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
 app.use(express.json({ limit: '5mb' }));
 
 // Rate limiting
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { error: 'Too many attempts, try again later' } });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT) || 20, message: { error: 'Too many attempts, try again later' } });
 const dropLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: { error: 'Too many uploads, try again later' } });
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Too many requests, try again later' } });
 app.use('/api/auth/', authLimiter);
 app.use('/api/drop/', dropLimiter);
 app.use('/api/', apiLimiter);
-
-// Trust the first reverse proxy to allow rate limiters to see real IPs
-// Required because Dockerized apps are usually accessed via an ingress proxy like Nginx/Traefik
-app.set('trust proxy', 1);
 
 // --- Security Headers (CSP + hardening) ---
 app.use((req, res, next) => {
@@ -141,7 +208,7 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-const DROP_DIR = path.join(__dirname, 'data', 'drop');
+const DROP_DIR = path.join(DATA_DIR, 'drop');
 if (!fs.existsSync(DROP_DIR)) {
     fs.mkdirSync(DROP_DIR, { recursive: true });
 }
@@ -152,10 +219,69 @@ const dropStorage = multer.diskStorage({
         cb(null, DROP_DIR);
     },
     filename: (req, file, cb) => {
-        cb(null, `${uuidv4()}_${file.originalname}`);
+        cb(null, `${uuidv4()}.upload`);
     }
 });
-const upload = multer({ storage: dropStorage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max per file
+const MAX_DROP_FILES = 20;
+const upload = multer({
+    storage: dropStorage,
+    limits: { fileSize: 50 * 1024 * 1024, files: MAX_DROP_FILES, fields: 10 } // 50MB max per file
+});
+
+function removeUploadedFiles(req) {
+    const files = req.files || (req.file ? [req.file] : []);
+    files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
+}
+
+// Total storage used by a user: pending drop packages plus active shares
+async function getStorageUsage(userId) {
+    const used = Number(await db.getUserMailboxUsage(userId)) || 0;
+    const shares = await db.getSharesByUserId(userId);
+    return used + shares.reduce((acc, s) => acc + Number(s.size), 0);
+}
+
+// Resolves a drop link (user ID with public link enabled, or unused one-time token)
+async function findDropRecipient(idOrToken) {
+    let user = await db.getUserById(idOrToken);
+    if (user && user.public_link_enabled !== 0) return { user, isToken: false };
+    user = await db.getUserByToken(idOrToken);
+    return user ? { user, isToken: true } : null;
+}
+
+// Runs before multer so nothing touches the disk for invalid links or full mailboxes
+const MULTIPART_OVERHEAD = 1024 * 1024;
+async function resolveDropTarget(req, res, next) {
+    try {
+        if (!isValidUUID(req.params.id)) {
+            return res.status(400).json({ error: 'Invalid link format' });
+        }
+        const target = await findDropRecipient(req.params.id);
+        if (!target) {
+            return res.status(404).json({ error: 'Recipient or valid link not found' });
+        }
+        const remaining = target.user.mailbox_quota - await getStorageUsage(target.user.id);
+        const declaredSize = parseInt(req.headers['content-length'], 10) || 0;
+        if (remaining <= 0 || declaredSize > remaining + MULTIPART_OVERHEAD) {
+            return res.status(413).json({ error: 'Mailbox quota exceeded' });
+        }
+        req.dropTarget = target;
+        next();
+    } catch (error) {
+        console.error('Drop target error:', error);
+        res.status(500).json({ error: 'Server error processing drop' });
+    }
+}
+
+// File names from the drop page arrive encrypted with the package session key
+const ENC_NAME_REGEX = /^enc:[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/;
+function parseEncryptedNames(raw) {
+    try {
+        const names = JSON.parse(raw || '[]');
+        return Array.isArray(names) ? names : [];
+    } catch {
+        return [];
+    }
+}
 
 // --- API Endpoints ---
 
@@ -172,6 +298,9 @@ app.post('/api/auth/register', async (req, res) => {
         if (!username || !salt || !publicKey || !encryptedPrivateKey || !iv || !serverAuthHash) {
             return res.status(400).json({ error: 'Missing required registration data' });
         }
+        if ([username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash].some(v => typeof v !== 'string')) {
+            return res.status(400).json({ error: 'Invalid registration data' });
+        }
 
         // Validate username format
         if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
@@ -183,7 +312,7 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(409).json({ error: 'User already exists' });
         }
 
-        const id = await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash);
+        const id = await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv, hashAuthToken(serverAuthHash));
         res.json({ success: true, userId: id });
     } catch (error) {
         console.error('Registration error:', error);
@@ -197,8 +326,8 @@ app.get('/api/auth/salt/:username', async (req, res) => {
     try {
         const user = await db.getUserByUsername(req.params.username);
         if (!user) {
-            // Return a fake salt to prevent timing/enumeration attacks
-            return res.json({ salt: 'FAKE_SALT_PREVENTS_ENUMERATION_xyz123==' });
+            // Return a fake (but stable and well-formed) salt to prevent enumeration
+            return res.json({ salt: fakeSaltFor(req.params.username) });
         }
         res.json({ salt: user.salt });
     } catch (error) {
@@ -210,20 +339,37 @@ app.get('/api/auth/salt/:username', async (req, res) => {
 // Step 2: Login with Server Auth Hash
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { username, serverAuthHash } = req.body;
-        if (!username || !serverAuthHash) return res.status(400).json({ error: 'Missing credentials' });
+        const { username, serverAuthHash, challengeResponse } = req.body;
+        if (typeof username !== 'string' || typeof serverAuthHash !== 'string' || !username || !serverAuthHash) {
+            return res.status(400).json({ error: 'Missing credentials' });
+        }
 
         const user = await db.getUserByUsername(username);
         if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Verify Server Auth Hash or perform legacy TOFU migration
-        if (user.server_auth_hash === 'LEGACY_MIGRATION_REQUIRED') {
-            console.log(`[Auth] Performing Trust-On-First-Use migration for legacy user: ${username}`);
-            await db.updateServerAuthHash(user.id, serverAuthHash);
-        } else if (user.server_auth_hash !== serverAuthHash) {
+        if (user.server_auth_hash === LEGACY_AUTH_MARKER) {
+            // Legacy account: only accept the new hash from whoever can decrypt with the account's private key
+            const pending = migrationChallenges.get(user.id);
+            if (typeof challengeResponse !== 'string' || !pending || pending.expiresAt < Date.now()) {
+                return res.json({
+                    migrationRequired: true,
+                    challenge: createMigrationChallenge(user),
+                    encryptedPrivateKey: user.encrypted_private_key,
+                    iv: user.iv
+                });
+            }
+            migrationChallenges.delete(user.id);
+            if (!safeEqual(pending.nonce, challengeResponse)) {
+                return res.status(401).json({ error: 'Invalid credentials' });
+            }
+            console.log(`[Auth] Legacy account migrated after key-possession proof: ${username}`);
+            await db.updateServerAuthHash(user.id, hashAuthToken(serverAuthHash));
+        } else if (!verifyAuthHash(user.server_auth_hash, serverAuthHash)) {
             return res.status(401).json({ error: 'Invalid credentials' });
+        } else if (!user.server_auth_hash.startsWith(AUTH_HASH_PREFIX)) {
+            await db.updateServerAuthHash(user.id, hashAuthToken(serverAuthHash));
         }
 
         // Update Last Login
@@ -255,18 +401,11 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
 // This can be via User UUID (if public link enabled) or One-Time Token
 app.get('/api/user/:id/public-key', async (req, res) => {
     try {
-        const idOrToken = req.params.id;
-        let user = await db.getUserById(idOrToken);
-
-        // If not a user ID, check if it's a valid token
-        if (!user || user.public_link_enabled === 0) {
-            user = await db.getUserByToken(idOrToken);
-        }
-
-        if (!user) {
+        const target = await findDropRecipient(req.params.id);
+        if (!target) {
             return res.status(404).json({ error: 'Valid repository or link not found' });
         }
-        res.json({ publicKey: user.public_key });
+        res.json({ publicKey: target.user.public_key });
     } catch (error) {
         console.error('Fetch public key error:', error);
         res.status(500).json({ error: 'Server error fetching public key' });
@@ -276,16 +415,11 @@ app.get('/api/user/:id/public-key', async (req, res) => {
 // 3.1 Get User Quota info
 app.get('/api/user/:uuid/quota', async (req, res) => {
     try {
-        const idOrToken = req.params.uuid;
-        let user = await db.getUserById(idOrToken);
+        const target = await findDropRecipient(req.params.uuid);
+        if (!target) return res.status(404).json({ error: 'User not found' });
 
-        if (!user || user.public_link_enabled === 0) {
-            user = await db.getUserByToken(idOrToken);
-        }
-
-        if (!user) return res.status(404).json({ error: 'User not found' });
-
-        const usage = await db.getUserMailboxUsage(user.id);
+        const user = target.user;
+        const usage = await getStorageUsage(user.id);
         res.json({
             quota: user.mailbox_quota,
             usage: usage,
@@ -352,64 +486,52 @@ app.delete('/api/user/:uuid/one-time-link/:token', requireAuth, async (req, res)
 });
 
 // 4. Drop Files (From the external sender)
-app.post('/api/drop/:id', upload.array('files'), async (req, res) => {
+app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, res) => {
     try {
-        const idOrToken = req.params.id;
-        if (!isValidUUID(idOrToken)) {
-            if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
-            return res.status(400).json({ error: 'Invalid link format' });
-        }
-
-        let user = await db.getUserById(idOrToken);
-        let isToken = false;
-
-        // If not a user ID (or link disabled), check if it's a valid token
-        if (!user || user.public_link_enabled === 0) {
-            user = await db.getUserByToken(idOrToken);
-            isToken = true;
-        }
-
-        if (!user) {
-            if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
-            return res.status(404).json({ error: 'Recipient or valid link not found' });
-        }
-
+        const { user, isToken } = req.dropTarget;
         const userId = user.id;
         let { senderName, encryptedSessionKey, encryptedMessage, messageIv } = req.body;
         const files = req.files || [];
 
-        // Sanitize senderName
+        // Sanitize senderName (the UI renders it as text, this just keeps it short and tidy)
         if (senderName) {
-            senderName = String(senderName).substring(0, 64).replace(/<[^>]*>/g, '');
+            senderName = String(senderName).substring(0, 64).replace(/[<>]/g, '');
         }
 
-        // Validate Quota
-        const used = await db.getUserMailboxUsage(userId);
+        // Validate Quota again with the real sizes (Content-Length may be absent)
+        const used = await getStorageUsage(userId);
         const incomingSize = files.reduce((acc, f) => acc + f.size, 0);
         if (used + incomingSize > user.mailbox_quota) {
-            if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
+            removeUploadedFiles(req);
             return res.status(413).json({ error: 'Mailbox quota exceeded' });
+        }
+
+        // Consume the one-time token atomically so two concurrent drops can't both use it
+        if (isToken && !(await db.consumeToken(req.params.id))) {
+            removeUploadedFiles(req);
+            return res.status(410).json({ error: 'This link has already been used' });
         }
 
         // Create the package in db
         const packageId = await db.createPackage(userId, senderName, encryptedSessionKey, encryptedMessage, messageIv);
 
         // Register files and rename them to standard format
-        for (const file of files) {
-            const packageFileId = await db.addPackageFile(packageId, file.originalname, file.mimetype, file.size);
+        const encryptedNames = parseEncryptedNames(req.body.fileNames);
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const encName = encryptedNames[i];
+            const storedName = typeof encName === 'string' && encName.length <= 2048 && ENC_NAME_REGEX.test(encName)
+                ? encName
+                : file.originalname;
+            const packageFileId = await db.addPackageFile(packageId, storedName, file.mimetype, file.size);
             const newPath = path.join(DROP_DIR, `${packageId}_${packageFileId}`);
             fs.renameSync(file.path, newPath);
         }
 
-        // Consume token if it was one
-        if (isToken) await db.consumeToken(idOrToken);
-
         res.json({ success: true, packageId });
     } catch (error) {
         console.error('Drop error:', error);
-        if (req.files) {
-            req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
-        }
+        removeUploadedFiles(req);
         res.status(500).json({ error: 'Server error processing drop' });
     }
 });
@@ -435,6 +557,11 @@ app.get('/api/package/:packageId/file/:fileId', requireAuth, async (req, res) =>
         // Validate UUID format to prevent path traversal
         if (!isValidUUID(packageId) || !isValidUUID(fileId)) {
             return res.status(400).json({ error: 'Invalid ID format' });
+        }
+        // Verify ownership (same 404 for "not yours" and "doesn't exist")
+        const pkg = await db.getPackageById(packageId);
+        if (!pkg || pkg.user_id !== req.session.userId || !pkg.files.some(f => f.id === fileId)) {
+            return res.status(404).json({ error: 'File not found' });
         }
         const filePath = path.join(DROP_DIR, `${packageId}_${fileId}`);
 
@@ -479,7 +606,7 @@ app.delete('/api/package/:packageId', requireAuth, async (req, res) => {
 });
 
 // --- Secure File Sharing ---
-const SHARE_DIR = path.join(__dirname, 'data', 'shares');
+const SHARE_DIR = path.join(DATA_DIR, 'shares');
 if (!fs.existsSync(SHARE_DIR)) {
     fs.mkdirSync(SHARE_DIR, { recursive: true });
 }
@@ -491,20 +618,20 @@ const shareStorage = multer.diskStorage({
         cb(null, uniqueName);
     }
 });
-const shareUpload = multer({ storage: shareStorage, limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB max
+const shareUpload = multer({ storage: shareStorage, limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 20 } }); // 100MB max
 
 // 8. Create Share (Upload encrypted file)
 app.post('/api/share/:userId', requireAuth, shareUpload.single('file'), async (req, res) => {
     try {
         const { userId } = req.params;
         if (req.session.userId !== userId) {
-            if (req.file) try { fs.unlinkSync(req.file.path); } catch { }
+            removeUploadedFiles(req);
             return res.status(403).json({ error: 'Forbidden' });
         }
         const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv, maxDownloads, expiresIn } = req.body;
 
         if (!req.file || !encryptedFileKey || !keyIv || !salt || !fileIv || !originalName) {
-            if (req.file) fs.unlinkSync(req.file.path);
+            removeUploadedFiles(req);
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
@@ -513,18 +640,13 @@ app.post('/api/share/:userId', requireAuth, shareUpload.single('file'), async (r
         // Validate Quota (shares count towards the same mailbox quota as drops)
         const user = await db.getUserById(userId);
         if (!user) {
-            if (req.file) try { fs.unlinkSync(req.file.path); } catch { }
+            removeUploadedFiles(req);
             return res.status(404).json({ error: 'User not found' });
         }
 
-        let usedQuota = await db.getUserMailboxUsage(userId);
-        // Also add the active shares to the quota check
-        const shares = await db.getSharesByUserId(userId);
-        const sharesSize = shares.reduce((acc, s) => acc + s.size, 0);
-        usedQuota += sharesSize;
-
+        const usedQuota = await getStorageUsage(userId);
         if (usedQuota + req.file.size > user.mailbox_quota) {
-            if (req.file) try { fs.unlinkSync(req.file.path); } catch { }
+            removeUploadedFiles(req);
             return res.status(413).json({ error: 'Storage quota exceeded' });
         }
 
@@ -551,7 +673,7 @@ app.post('/api/share/:userId', requireAuth, shareUpload.single('file'), async (r
         res.json({ success: true, token });
     } catch (error) {
         console.error('Share create error:', error);
-        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        removeUploadedFiles(req);
         res.status(500).json({ error: 'Server error creating share' });
     }
 });
@@ -620,8 +742,10 @@ app.get('/api/share/:token/download', async (req, res) => {
             return res.status(404).json({ error: 'File not found on disk' });
         }
 
-        // Increment download count
-        await db.incrementShareDownloads(req.params.token);
+        // Count the download atomically; fails if a concurrent request took the last one
+        if (!(await db.incrementShareDownloads(req.params.token))) {
+            return res.status(410).json({ error: 'Download limit reached' });
+        }
 
         res.sendFile(filePath);
     } catch (error) {
@@ -666,6 +790,35 @@ app.delete('/api/share/:token', requireAuth, async (req, res) => {
     }
 });
 
+// Expired or exhausted shares: remove file and row so they stop counting against the quota
+async function purgeDeadShares() {
+    try {
+        const now = new Date();
+        const shares = await db.getAllShareLimits();
+        for (const s of shares) {
+            const expired = s.expires_at && new Date(s.expires_at) < now;
+            const exhausted = s.max_downloads > 0 && s.download_count >= s.max_downloads;
+            if (!expired && !exhausted) continue;
+            try { fs.unlinkSync(path.join(SHARE_DIR, `${s.token}.enc`)); } catch { }
+            await db.deleteShare(s.token);
+        }
+    } catch (error) {
+        console.error('Share cleanup error:', error);
+    }
+}
+setTimeout(purgeDeadShares, 10 * 1000);
+setInterval(purgeDeadShares, 60 * 60 * 1000);
+
+// Upload limit errors (too many files, too large...) as JSON instead of an HTML error page
+app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        const status = err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT' ? 413 : 400;
+        return res.status(status).json({ error: `Upload rejected: ${err.message}` });
+    }
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: 'Server error' });
+});
+
 // --- Server Setup ---
 
 // Find SSL certificates — supports multiple locations and naming conventions
@@ -691,8 +844,6 @@ function findSSLCerts() {
     }
     return null;
 }
-
-const sslCerts = findSSLCerts();
 
 if (sslCerts) {
     try {

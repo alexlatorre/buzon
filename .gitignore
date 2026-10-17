@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Runtime data: SQLite DB, uploaded files, salt secret
+data/
+buzon.db*
+
+# TLS certificates and keys
+*.pem
+*.key
+*.crt
+certs/
+
+# Local configuration and secrets
+.env
+.env.*
+
+# Build artifacts and editor files
+*.tar
+.vscode/
+.DS_Store
+Thumbs.db

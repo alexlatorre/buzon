@@ -2,118 +2,147 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-Shadow Drop is a file and message delivery platform with **Zero-Knowledge** architecture. It allows anyone to send you information securely — the server is unable to read any content.
+Shadow Drop is a file and message delivery platform with a **Zero-Knowledge** architecture. Anyone can send you files and messages through a link; everything is encrypted in the sender's browser and only your browser can decrypt it. The server stores encrypted blobs it cannot read.
 
 https://gallifrey.sytes.net/
+
+🇪🇸 [Versión en español más abajo](#-español)
+
+---
+
+## Contents
+
+- [User guide](#-user-guide)
+- [How the cryptography works](#-how-the-cryptography-works)
+- [Security measures](#-security-measures)
+- [Threat model and limitations](#-threat-model-and-limitations)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [Docker](#-docker)
+- [Tests](#-tests)
+- [API reference](#-api-reference)
+- [Upgrading from earlier versions](#-upgrading-from-earlier-versions)
+- [Project structure](#-project-structure)
+- [Trusted hashes](#-trusted-hashes-sha-256)
 
 ---
 
 ## 🚀 User Guide
 
-### 1. Registration & Login
-- Create an account with a **Username** and **Master Password**.
-- The **strength meter** shows password security in real time (red/very weak → green/very strong).
-- **IMPORTANT**: Your master password is the only key to your data. If lost, nobody (not even the server admin) can recover your files.
+### 1. Registration & login
+- Create an account with a **username** (3–32 letters, digits or `_`) and a **master password**.
+- The **strength meter** rates the password in real time.
+- **Important**: the master password is the only key to your data. If you lose it, nobody (not even the server admin) can recover your files.
 
-### 2. Receiving Files (Drop)
-- After login, your **Public Link** is shown. Share it to receive files.
-- You can generate **One-Time Links** from the sidebar — they expire after the first successful submission.
-- You can disable the public link at any time from the Dashboard settings.
+### 2. Receiving files (Drop)
+- After login your **public link** is shown. Anyone with it can send you an encrypted package.
+- Generate **one-time links** from the sidebar: each works for exactly one submission.
+- You can disable the public link at any time; one-time links keep working.
 
-### 3. Download & Read
-- Packages appear in your inbox.
-- Opening a package decrypts it in your browser.
-- Download files individually or all at once — original names and extensions are restored automatically.
+### 3. Reading packages
+- Packages appear in your inbox. Opening one decrypts the message, the file names and the files in your browser.
+- Download files one by one or all at once; original names and types are restored.
+- **Destroy Package** deletes it permanently from the server.
 
-### 4. Security Page (About)
-- From the login screen, click **"How does it work? Learn about our security →"** for a full visual explanation.
-- Covers the **3-step user flow** (Registration → Sending → Receiving), a **real-time data flow diagram**, detailed breakdowns of each cryptographic primitive (PBKDF2, RSA-OAEP, AES-GCM, Web Crypto API), a **"What the server sees"** panel showing only encrypted blobs, and a list of additional security features.
+### 4. Secure file sharing
+- Click **📤 Share File**, drop a file, set an **unlock password** and, optionally, an encrypted note.
+- Choose an **expiry** (1 h, 24 h, 7 days, 30 days, never) and a **download limit** (1, 5, 10, 25, unlimited).
+- Send the generated link and, through a different channel, the password. The recipient decrypts the file in their browser.
+- Expired or exhausted shares are removed from the server automatically (hourly).
 
-### 5. Secure File Sharing
-- From the dashboard, click **📤 Share File** in the sidebar.
-- **Drag & drop** a file onto the drop zone (or click to browse), set an **unlock password** with strength meter, and optionally add an encrypted message.
-- Configure **expiration** (1h, 24h, 7 days, 30 days, or never) and **download limit** (1, 5, 10, 25, unlimited).
-- The browser encrypts the file with **AES-256-GCM** and wraps the key with **PBKDF2** (600K iterations) derived from the password.
-- A unique shareable link is generated — copy it and send to the recipient.
-- The recipient opens the link, sees file info and remaining downloads/expiry, enters the password, and the file is decrypted and downloaded **exclusively in their browser**.
-- The server **never** has access to the file contents, the password, or the encryption key.
+### 5. Security page
+From the login screen, **"How does it work? Learn about our security →"** opens a visual explanation of the whole crypto flow.
 
 ---
 
-## 🛡️ Security
+## 🔐 How the cryptography works
 
-### Zero-Knowledge Architecture
-Unlike other services, Shadow Drop uses real **End-to-End Encryption (E2EE)**. The server acts only as "blind storage" for encrypted bits.
+Everything runs in the browser with the Web Crypto API (`window.crypto.subtle`).
 
-#### Where does the magic happen?
-All cryptographic processing occurs **exclusively in the user's Browser** using the `window.crypto` (Web Crypto API).
-
-1. **Registration/Login (Receiver)**: Master password derives a key via **PBKDF2** (600,000 iterations, SHA-256). RSA-4096 private key is encrypted with this derived key **before** leaving your machine.
-2. **Sending (Sender)**: Downloads your public key → generates a random **AES-GCM-256** session key → encrypts files and message with AES → encrypts AES key with your RSA public key (**RSA-OAEP**).
-3. **Receiving (Receiver)**: Browser downloads the encrypted block → private key (decrypted in RAM after login) decrypts the AES key → AES key decrypts the message and files.
-
-**Result**: The server never holds the keys to view your files.
-
-### Content Security Policy (CSP)
-Strict HTTP security headers: `script-src 'self'` (blocks XSS), `frame-ancestors 'none'` (anti-clickjacking), `no-referrer`, `no-store`, disabled camera/microphone/geolocation.
-
-### File Integrity Verification
-All **10 frontend files** (JS, CSS, and HTML) are verified on every page load:
-1. **Server hashing**: On startup, SHA-256 hashes are computed for all public files and exposed at `/api/integrity`.
-2. **Client verification**: The browser independently fetches and hashes each file, comparing against the server's reported values (detects MITM/proxy tampering).
-3. **Change detection (localStorage)**: First-visit fingerprints are stored; any subsequent change triggers an **integrity alert** banner with affected file names.
-4. **GitHub verification**: Each file in the hash panel links directly to its source on [GitHub](https://github.com/alexlatorre/buzon/tree/master/public) for external comparison.
-5. **Accept or reject**: Users can review changes and accept them as trusted, or refuse to enter credentials.
-
-> **Note**: An attacker controlling the server could rewrite `integrity.js` to bypass this check. Always compare hashes against this README or the GitHub repo as an external source of truth.
-
-### Advanced Security Mechanics
-- **Zero-Knowledge Auth Hash**: Login provides mathematical proof of the master key without transmitting the password or the key itself via a computationally linked Server Auth Hash.
-- **Strict Session Management**: Stateful, token-based (`Authorization: Bearer`) protection on all endpoints that interact with user resources.
-- **Anti-DoS & Rate Limiting**: `express-rate-limit` protects authentication and upload endpoints, fully supporting reverse proxies (`trust proxy`).
-- **Disk Exhaustion Quotas**: Both "Drop" and "Share" endpoints calculate and enforce a strict 500MB combined user quota.
-- **Path Traversal Protection**: Cryptographically strict UUIDv4 regex validation on all routing parameters.
-- **Network Hardening**: HSTS `Strict-Transport-Security` enforced, wildcard CORS removed, and MIME-sniffing disabled.
-- **Anti-Enumeration**: Uniform error messages on login and fake-salt routing to mask registered users.
-- **Boss Key** (double ESC): Instant session logout with memory wipe.
-- **One-Time Links**: Auto-invalidated after first submission.
-- **Disable Public Link**: Cut external access at any time.
-- **Package Destruction**: Permanent server-side file deletion after reading.
-- **Password Strength Meter**: Real-time evaluation of length, character variety, and uniqueness.
-- **Responsive Design**: Mobile and tablet adaptive interface with sliding sidebar.
-
-### 🔏 Trusted Hashes (SHA-256)
-Use this table as an external source of truth to verify that files served by your instance have not been tampered with.
-
-| File | SHA-256 |
+| Step | What happens |
 |---|---|
-| `app.js` | `28d2aaddd82ce04f808fc070662e319a8b1dfca842c8186ce82dd76d63cdfe36` |
-| `crypto.js` | `f27ed04bb2acba0045e0433d77c4e1058af5d3313b44b4303311fd8d4b5f8d68` |
-| `integrity.js` | `0a897a7a4869fb40a52b996b76ae52a60c1af548913ae2bce8e2e9cdd980e053` |
-| `share.js` | `cc9a1a55b27713204604ed323f18682b62a4e3b0cfcef904317e4bc1ba571a91` |
-| `drop.js` | `fe68762008b9712982a0b8f0a77f5cbcc70878f611c19ea7d3e0793072ac8eb2` |
-| `style.css` | `d959dbcb0061ce42eb6e1afb714d964070d76c079b80f1540d1bd067b6a58335` |
-| `index.html` | `f145a0e3305e363d199f837d6d0af58c9d08d37e25a23f6b86d94ef4f473a9f6` |
-| `about.html` | `40e3884215f5b5b429efe48887880d8b99cf17f65ae2e5676cfdc02a547cd4ef` |
-| `drop.html` | `212cfaadd493f015dff8d832cb01f30139dcecf7eff48adcd5233d4d29277888` |
-| `share.html` | `7e310e38af379693f2f6dbf50c4f00c3eecf2c7dfd6b6d1c3acd317716c9c531` |
+| **Register** | `PBKDF2(password, random 16-byte salt, 600 000 iterations, SHA-256)` → AES-256 master key. An RSA-4096 key pair is generated; the private key is encrypted with the master key (AES-GCM) before upload. |
+| **Login** | The browser derives the master key again and sends only `serverAuthHash = SHA-256(masterKey ‖ "SERVER_AUTH")`. The server stores `SHA-256(serverAuthHash)`, compares in constant time and returns the encrypted private key, which is decrypted in memory. |
+| **Send (drop)** | The sender's browser fetches your public key, creates a random AES-256-GCM session key, encrypts the message, **each file and each file name** with it, and wraps the session key with RSA-OAEP. |
+| **Receive** | Your private key unwraps the session key, which decrypts message, names and files. |
+| **Share** | A random AES-256-GCM key encrypts the file; that key is wrapped with `PBKDF2(share password, random salt, 600 000)`. |
 
-> **Manual verification** (browser console F12):
-> ```javascript
-> fetch('/app.js').then(r=>r.text()).then(t=>crypto.subtle.digest('SHA-256',new TextEncoder().encode(t))).then(h=>console.log(Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('')))
-> ```
+The server never sees passwords, master keys, private keys, session keys, messages, file contents or (for drops) file names.
+
+---
+
+## 🛡️ Security measures
+
+- **End-to-end encryption**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iterations).
+- **Auth hash at rest**: the database keeps a hash of the login token, so a leaked database cannot be replayed to log in.
+- **Legacy account migration with proof of key**: accounts created before the auth hash existed are only upgraded when the client decrypts a random challenge encrypted with the account's public key.
+- **Sessions**: random bearer tokens (`Authorization: Bearer`), 24 h lifetime, ownership checked on every user resource (packages, files, shares, links).
+- **Strict CSP and headers**: `script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, HSTS, `nosniff`, `no-referrer`, `no-store`, no CORS.
+- **Untrusted data rendered as text**: sender names and file names never go through `innerHTML`.
+- **Rate limiting**: auth (20 / 15 min), uploads (50 / 15 min) and API (200 / 15 min) per IP. `X-Forwarded-For` is only trusted when configured (see `TRUST_PROXY`).
+- **Upload hardening**: drop links and quota are checked **before** anything is written to disk; at most 20 files × 50 MB per drop and 1 file × 100 MB per share; multer errors are returned as JSON.
+- **Race-free limits**: one-time links and download limits are enforced with atomic conditional updates.
+- **Quotas**: drops and shares share a 500 MB per-user quota.
+- **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
+- **Anti-enumeration on login**: unknown usernames get a deterministic, well-formed fake salt and the same error as a wrong password.
+- **File integrity check**: the 10 frontend files are hashed by the server and by the browser, compared with the hashes seen on the previous visit, and linked to GitHub for external comparison.
+- **Boss key** (double ESC): instant logout and memory wipe.
+
+---
+
+## ⚠️ Threat model and limitations
+
+Be clear about what Shadow Drop protects against:
+
+- **A malicious or compromised server can serve modified JavaScript** that steals your password. The integrity check makes this visible (it alerts when files change between visits and lets you compare with the [trusted hashes](#-trusted-hashes-sha-256)), but it cannot prevent it: whoever controls the server also controls `integrity.js`.
+- **Metadata is visible to the server**: who receives packages, when, how many files and their encrypted sizes, the sender name the sender typed, and for shares the file name and type (shown to the recipient before they enter the password).
+- **Offline guessing**: the salt and encrypted private key of a user, and the salt and wrapped key of a share, are available to an attacker who gets the database (or, for shares, the link). PBKDF2 with 600 000 iterations slows guessing down; a strong password is still the real protection.
+- **Registration reveals whether a username exists** (it must, to avoid duplicates). Login does not.
+- **Sessions are kept in memory**: restarting the server logs everyone out.
+
+---
+
+## 📦 Installation
+
+Requirements: **Node.js 20+** and **HTTPS** in front of users (the Web Crypto API only works in secure contexts; `localhost` is fine for development).
+
+```bash
+npm install
+npm start
+```
+
+Open `http://localhost:4000` (or `https://` if certificates are found, see below).
+
+For MySQL also install the driver: `npm install mysql2`.
+
+---
+
+## ⚙️ Configuration
+
+All settings are environment variables; nothing secret lives in the repository.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `4000` | Listening port. |
+| `DATA_DIR` | `./data` | SQLite database, uploaded files, shares and the fake-salt secret. |
+| `DB_ENGINE` | `sqlite` | `sqlite` or `mysql`. |
+| `MYSQL_HOST` / `MYSQL_PORT` | `localhost` / `3306` | MySQL server. |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | `root` / *(empty)* | MySQL credentials. Use a dedicated user. |
+| `MYSQL_DATABASE` | `buzon` | MySQL database name. |
+| `TLS` | *(on)* | `off` forces plain HTTP even if certificates exist (TLS terminated by a proxy). |
+| `TRUST_PROXY` | `1` without certs, `false` with certs | Express `trust proxy` setting. Set it to the number of proxies in front of the app; use `false` when the app is exposed directly, otherwise clients can forge `X-Forwarded-For` and bypass rate limits. |
+| `AUTH_RATE_LIMIT` | `20` | Auth requests per IP every 15 minutes. |
+
+### TLS certificates
+The server looks for, in order: `certs/fullchain.pem` + `certs/privkey.pem`, `fullchain.pem` + `privkey.pem`, `cert.pem` + `key.pem`. If none are found (or `TLS=off`) it serves HTTP, which is the right setup behind a reverse proxy that handles TLS. Certificates and keys are git-ignored.
 
 ---
 
 ## 🐳 Docker
 
-### Build
 ```bash
 docker build -t shadow-drop .
-```
 
-### Run with persistent data
-```bash
 docker run -d -p 443:4000 \
   -v ./data:/app/data \
   -v ./fullchain.pem:/app/certs/fullchain.pem:ro \
@@ -121,90 +150,151 @@ docker run -d -p 443:4000 \
   --name shadow-drop shadow-drop
 ```
 
-### Export / Import
+The container runs as the unprivileged `node` user (uid 1000):
+
+- The `data` volume must be writable by uid 1000: `sudo chown -R 1000:1000 ./data`.
+- `privkey.pem` must be readable by uid 1000. Let's Encrypt keys are usually `root`-only; copy them with the right owner or terminate TLS in a reverse proxy and run with `-e TLS=off -e TRUST_PROXY=1`.
+
+Behind a reverse proxy (Nginx, Traefik, Caddy):
+
 ```bash
-docker save -o shadow-drop.tar shadow-drop   # Export
-docker load -i shadow-drop.tar               # Import
+docker run -d -p 127.0.0.1:4000:4000 -v ./data:/app/data \
+  -e TLS=off -e TRUST_PROXY=1 --name shadow-drop shadow-drop
 ```
 
 ---
 
-## ⚙️ Setup & Configuration
+## 🧪 Tests
 
-### Requirements
-- **Node.js** (v18+ recommended).
-- **HTTPS**: Required for browser crypto APIs. Mount your SSL certs or run behind a reverse proxy.
+```bash
+npm test
+```
 
-### Database
-Supports **SQLite** (default) and **MySQL**. Configure in `config.js`:
+The suite (`test/`, Node's built-in test runner, no extra dependencies) starts real server instances on random ports with throw-away data directories and drives them with the same WebCrypto steps as the browser. It covers registration and login, legacy migration, fake salts, sessions and ownership checks, drops with encrypted names, one-time links and download limits under concurrency, quotas, upload limits, share expiry, security headers, the integrity endpoint and rate limiting.
+
+---
+
+## 📡 API reference
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | – | Create an account (salt, public key, encrypted private key, auth hash). |
+| `GET` | `/api/auth/salt/:username` | – | PBKDF2 salt (fake but stable for unknown users). |
+| `POST` | `/api/auth/login` | – | Log in with the auth hash; legacy accounts answer a challenge first. |
+| `POST` | `/api/auth/logout` | ✔ | End the session. |
+| `GET` | `/api/user/:id/public-key` | – | Public key behind a drop link. |
+| `GET` | `/api/user/:id/quota` | – | Quota and usage behind a drop link. |
+| `POST` | `/api/user/:id/config` | ✔ | Enable or disable the public link. |
+| `POST` / `GET` / `DELETE` | `/api/user/:id/one-time-link(s)` | ✔ | Manage one-time links. |
+| `POST` | `/api/drop/:id` | – | Send an encrypted package (multipart). |
+| `GET` | `/api/packages/:id` | ✔ | List your packages. |
+| `GET` | `/api/package/:packageId/file/:fileId` | ✔ | Download an encrypted file you own. |
+| `DELETE` | `/api/package/:packageId` | ✔ | Destroy a package you own. |
+| `POST` | `/api/share/:userId` | ✔ | Upload an encrypted share. |
+| `GET` | `/api/share/:token/meta` | – | Share metadata and wrapped key. |
+| `GET` | `/api/share/:token/download` | – | Download the encrypted share (counts towards the limit). |
+| `GET` | `/api/shares/:userId` | ✔ | List your shares. |
+| `DELETE` | `/api/share/:token` | ✔ | Delete a share you own. |
+| `GET` | `/api/integrity` | – | SHA-256 of the 10 frontend files. |
+
+---
+
+## ⬆️ Upgrading from earlier versions
+
+- **Auth hashes**: existing rows are re-hashed automatically on each user's next login.
+- **Legacy accounts** (`LEGACY_MIGRATION_REQUIRED`): the next login transparently answers a key-possession challenge; no action needed.
+- **MySQL**: missing `users` columns are added on startup.
+- **Configuration**: `config.js` no longer holds credentials; move them to the environment variables above.
+- **Docker**: the image now runs as uid 1000; fix volume and key permissions as described in [Docker](#-docker).
+- **Drops**: file names are encrypted for packages sent with the new `drop.js`. Older packages keep their plain names and still open normally.
+
+---
+
+## 📂 Project structure
+
+- `server.js` – Express API, security headers, rate limits, uploads, TLS discovery.
+- `config.js` – Configuration read from environment variables.
+- `db.js`, `db/sqlite.js`, `db/mysql.js` – Database drivers with the same interface.
+- `public/` – Frontend (vanilla JS, HTML, CSS):
+  - `app.js` – Login, inbox, packages, one-time links, sharing.
+  - `crypto.js` – PBKDF2, RSA-OAEP, AES-GCM helpers.
+  - `drop.js` / `drop.html` – Sender page.
+  - `share.js` / `share.html` – Share download page.
+  - `integrity.js` – Client-side integrity check.
+  - `about.html` – Security explanation page.
+- `test/` – Automated tests (`npm test`).
+- `Dockerfile` – Node 20 Alpine image, runs as `node`.
+- `LICENSE` – AGPL-3.0.
+
+---
+
+## 🔏 Trusted Hashes (SHA-256)
+
+The repository forces LF line endings (`.gitattributes`), so these hashes are the same on GitHub, in any checkout (Windows included) and in the Docker image. Compare them with what your instance serves; `npm test` fails if this table is out of date.
+
+<!-- hashes:start -->
+| File | SHA-256 |
+|---|---|
+| `app.js` | `d3f6bdc80df895d5138fa037c65f92082059c9cda07dda7735a68ec230ad992a` |
+| `crypto.js` | `2540b202e93d02904ddcf150faf4c812e1736eee2f5c2a67d8d6520275cd01c1` |
+| `integrity.js` | `10c0ea69af9e30c0540daa8f5366be574e482f5edbf49b7ffb4d4ccdf90ca37b` |
+| `share.js` | `bd68cd9b5f5d865a21dfc6f4055c4484008c523889dcec73d151356e474f1f0a` |
+| `drop.js` | `31d6a9fd17d19be85b16899dd9df093776b70016fcb541bf8e0e95f260f5e21d` |
+| `style.css` | `7010497f5780066110fbddaa4604234adfc33fd64b635a28d560d7392471109b` |
+| `index.html` | `4e43db093b5218ad8e822baf0ae0d81363e75df688efc984b9c932a86c78ef55` |
+| `about.html` | `5eea32319dfd255efd0eab6c8816c835e577adccbc0ed14a5e50599ebfc4b1e6` |
+| `drop.html` | `23e6cd33fce3d27d050f855b17880eae32f4e9dc67d32a5e951c93f800f7f7cd` |
+| `share.html` | `b7ebc86f67b7e5d41d499e895a78e8820d1f6ccb573d627f5e82d6b44b6539b4` |
+<!-- hashes:end -->
+
+Manual check from the browser console (F12):
 
 ```javascript
-module.exports = {
-    db: {
-        engine: 'sqlite', // or 'mysql'
-        mysql: { host: 'localhost', user: 'root', password: 'your_password', database: 'buzon' }
-    }
-};
+fetch('/app.js').then(r=>r.text()).then(t=>crypto.subtle.digest('SHA-256',new TextEncoder().encode(t))).then(h=>console.log(Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('')))
 ```
-
-*Note: For MySQL, run `npm install mysql2`.*
-
-### Run
-1. Install: `npm install`
-2. Start: `npm start` or `node server.js`
-3. Open `https://localhost:4000`
-
----
-
-## 📂 Project Structure
-- `/public`: Frontend (Vanilla JS, HTML, CSS). Apple-inspired premium design.
-  - `app.js`: Main application logic (auth, inbox, packages, sidebar, share modal).
-  - `crypto.js`: Cryptographic utilities (PBKDF2, RSA-OAEP, AES-GCM).
-  - `integrity.js`: Client-side file integrity verification (all 10 files).
-  - `share.js`: Secure file sharing download page logic (PBKDF2 + AES-GCM decryption).
-  - `drop.js`: Public/one-time link file upload logic.
-  - `about.html`: Security deep-dive page (crypto flow, architecture, features).
-  - `share.html`: Password-protected file download page for recipients.
-  - `drop.html`: Drag & drop file submission page for senders.
-- `/db`: Database drivers (SQLite/MySQL).
-- `/data`: Local storage (database + encrypted files + shared files).
-- `server.js`: Backend API (Express) with CSP and security headers.
-- `config.js`: Global configuration.
-- `Dockerfile`: Alpine + Node 20 Docker image.
-- `LICENSE`: AGPL-3.0 open-source license.
 
 ---
 ---
 
 # 🇪🇸 Español
 
-Shadow Drop es una plataforma de entrega de archivos y mensajes con arquitectura **Zero-Knowledge**. Permite que cualquier persona te envíe información de manera ultra-segura sin que el servidor pueda leer el contenido.
+Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura **Zero-Knowledge**: todo se cifra en el navegador de quien envía y solo tu navegador puede descifrarlo. El servidor guarda bloques cifrados que no puede leer.
 
-## Guía Rápida
-1. **Registro**: Elige usuario y contraseña maestra. **Si la pierdes, nadie puede recuperar tus datos.**
-2. **Recibir archivos**: Comparte tu enlace público o genera enlaces de un solo uso.
-3. **Descargar**: Los paquetes se descifran en tu navegador. Descarga individual o masiva.
-4. **Compartir ficheros**: Pulsa 📤 Share File → arrastra un archivo al área de drop (o selecciona) + contraseña con medidor de fuerza → se cifra con AES-256-GCM + PBKDF2 (600K iteraciones) → comparte el enlace generado. El receptor introduce la contraseña para descifrar y descargar.
-5. **Página de seguridad**: Desde el login, accede a la explicación visual completa de la arquitectura cripto (flujo de datos, primitivas, qué ve el servidor).
+## Guía rápida
+1. **Registro**: elige usuario y contraseña maestra. **Si la pierdes, nadie puede recuperar tus datos.**
+2. **Recibir**: comparte tu enlace público o genera enlaces de un solo uso (sirven para un único envío).
+3. **Leer**: los paquetes, sus mensajes y los nombres de los ficheros se descifran en tu navegador. **Destroy Package** los borra del servidor.
+4. **Compartir ficheros**: 📤 Share File → arrastra el fichero, pon una contraseña y, si quieres, caducidad y límite de descargas. Envía el enlace y, por otro canal, la contraseña. Los enlaces caducados o agotados se borran solos cada hora.
 
 ## Seguridad
-- **E2EE real** con RSA-4096 + AES-256-GCM + PBKDF2 (600K iteraciones).
-- **CSP estricta**: Solo scripts propios, sin iframes, sin caché.
-- **Verificación de integridad de los 10 ficheros del frontend**: Hashes SHA-256 verificados contra el servidor, localStorage y GitHub.
-## Seguridad Avanzada
-- **Zero-Knowledge Auth Hash**: El inicio de sesión demuestra matemáticamente el conocimiento de la clave maestra sin transmitir jamás la contraseña por la red.
-- **Gestión estricta de sesiones**: Protección mediante tokens con estado (`Authorization: Bearer`) para todos los endpoints que interactúan con recursos de usuario.
-- **Anti-DoS y Limitación de Peticiones**: Protección contra fuerza bruta con soporte total para proxys inversos en Docker (`trust proxy`).
-- **Cuotas de prevención contra agotamiento de disco**: Límite estricto de 500MB combinado entre todos los paquetes ("Drop" y compartidos protegidos con contraseña).
-- **Protección contra Path Traversal**: Validación criptográfica estricta mediante expresiones regulares en los UUIDv4 de todas las rutas de la API.
-- **Endurecimiento de Red**: Forzado de HTTPS absoluto con cabecera HSTS `Strict-Transport-Security` y limitación total de CORS.
-- **Anti-Enumeración de Usuarios**: Respuestas de error unificadas y enrutamiento con *sal* falsa para ocultar qué usuarios están registrados.
-- **Boss Key** (doble ESC): Cierre instantáneo de sesión con borrado de memoria RAM.
-- **Enlaces de un solo uso**: Invalidados automáticamente tras la primera visualización.
-- **Desactivación de enlace público**: Corta el acceso de las subidas anónimas al instante.
-- **Destrucción de paquetes**: Borrado permanente del servidor tras la lectura.
-- **Diseño responsive**: Optimizado para móviles y tablets.
-- **Licencia**: AGPL-3.0 — código abierto, forks obligados a publicar cambios.
+- **Cifrado de extremo a extremo**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iteraciones).
+- **El servidor no ve** contraseñas, claves, mensajes, contenido de ficheros ni (en los envíos) sus nombres.
+- **Hash de autenticación protegido**: la base de datos guarda un hash del token de login; si se filtra, no sirve para entrar.
+- **Migración de cuentas antiguas con prueba de clave**: solo se actualizan si el navegador descifra un reto cifrado con la clave pública de la cuenta.
+- **Sesiones** con token `Bearer` de 24 h y comprobación de propietario en paquetes, ficheros, shares y enlaces.
+- **CSP estricta y cabeceras** (HSTS, `nosniff`, `no-referrer`, sin iframes, sin CORS). Los nombres de remitente y de fichero se pintan siempre como texto.
+- **Límites de peticiones** por IP; `X-Forwarded-For` solo se tiene en cuenta si se configura `TRUST_PROXY`.
+- **Subidas protegidas**: enlace y cuota se comprueban antes de escribir en disco; máximo 20 ficheros de 50 MB por envío y 1 de 100 MB por share.
+- **Límites sin condiciones de carrera** en enlaces de un solo uso y en descargas.
+- **Cuota** de 500 MB por usuario para envíos y shares juntos.
+- **Verificación de integridad** de los 10 ficheros del frontend.
+- **Boss key** (doble ESC): cierra la sesión y borra la memoria al instante.
+
+## Límites conocidos
+- Un servidor comprometido puede servir JavaScript modificado. La verificación de integridad lo hace visible, pero no lo puede impedir.
+- El servidor ve metadatos: cuándo recibes paquetes, cuántos ficheros y su tamaño cifrado, el nombre de remitente que escribe quien envía y, en los shares, el nombre del fichero.
+- Quien obtenga la base de datos (o el enlace de un share) puede intentar adivinar contraseñas sin conexión; PBKDF2 lo frena, pero la defensa real es una contraseña fuerte.
+- El registro revela si un usuario existe; el login no.
+- Las sesiones viven en memoria: al reiniciar el servidor hay que volver a entrar.
+
+## Instalación y configuración
+```bash
+npm install
+npm start      # http://localhost:4000
+npm test       # batería de pruebas automáticas
+```
+
+Se configura con variables de entorno (tabla completa en [Configuration](#-configuration)): `PORT`, `DATA_DIR`, `DB_ENGINE`, `MYSQL_*`, `TLS=off` para servir HTTP detrás de un proxy, `TRUST_PROXY` (pon `false` si el servidor está expuesto directamente) y `AUTH_RATE_LIMIT`.
 
 ## Docker
 ```bash
@@ -214,3 +304,8 @@ docker run -d -p 443:4000 \
   -v ./privkey.pem:/app/certs/privkey.pem:ro \
   --name shadow-drop shadow-drop
 ```
+
+El contenedor se ejecuta como el usuario `node` (uid 1000): el volumen `data` tiene que ser suyo (`sudo chown -R 1000:1000 ./data`) y debe poder leer `privkey.pem`. Detrás de un proxy inverso usa `-e TLS=off -e TRUST_PROXY=1`.
+
+## Licencia
+AGPL-3.0: código abierto; quien lo modifique y lo ofrezca como servicio debe publicar sus cambios.

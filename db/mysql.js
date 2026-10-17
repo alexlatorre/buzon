@@ -11,6 +11,7 @@ try {
 
     pool = mysql.createPool({
         host: config.host,
+        port: config.port,
         user: config.user,
         password: config.password,
         database: config.database,
@@ -92,6 +93,20 @@ try {
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
             `);
+            // Columns added after the first release (CREATE TABLE IF NOT EXISTS won't add them)
+            const [cols] = await conn.query(
+                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'"
+            );
+            const userCols = cols.map(c => c.COLUMN_NAME);
+            const userMigrations = {
+                public_link_enabled: 'ALTER TABLE users ADD COLUMN public_link_enabled BOOLEAN DEFAULT TRUE',
+                mailbox_quota: 'ALTER TABLE users ADD COLUMN mailbox_quota BIGINT DEFAULT 524288000',
+                last_login: 'ALTER TABLE users ADD COLUMN last_login DATETIME',
+                server_auth_hash: "ALTER TABLE users ADD COLUMN server_auth_hash VARCHAR(255) NOT NULL DEFAULT 'LEGACY_MIGRATION_REQUIRED'"
+            };
+            for (const [col, sql] of Object.entries(userMigrations)) {
+                if (!userCols.includes(col)) await conn.query(sql);
+            }
             console.log("MySQL tables synchronized.");
         } catch (err) {
             console.error("Failed to initialize MySQL tables:", err);
@@ -152,7 +167,7 @@ module.exports = {
     },
 
     getPackagesByUserId: async (userId) => {
-        const [packages] = await pool.execute('SELECT * FROM packages WHERE user_id = ? AND status = "pending" ORDER BY created_at DESC', [userId]);
+        const [packages] = await pool.execute("SELECT * FROM packages WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC", [userId]);
         for (let pkg of packages) {
             const [files] = await pool.execute('SELECT * FROM package_files WHERE package_id = ?', [pkg.id]);
             pkg.files = files;
@@ -182,7 +197,8 @@ module.exports = {
             JOIN packages p ON pf.package_id = p.id
             WHERE p.user_id = ? AND p.status = 'pending'
         `, [userId]);
-        return rows[0].totalSize || 0;
+        // SUM() comes back as a DECIMAL string from mysql2
+        return Number(rows[0].totalSize) || 0;
     },
 
     togglePublicLink: async (userId, enabled) => {
@@ -207,8 +223,10 @@ module.exports = {
         return module.exports.getUserById(link.user_id);
     },
 
+    // Returns true only for the request that actually flipped the token to used
     consumeToken: async (token) => {
-        await pool.execute('UPDATE one_time_links SET is_used = 1 WHERE token = ?', [token]);
+        const [result] = await pool.execute('UPDATE one_time_links SET is_used = 1 WHERE token = ? AND is_used = 0', [token]);
+        return result.affectedRows > 0;
     },
 
     deleteOneTimeLink: async (token, userId) => {
@@ -230,8 +248,18 @@ module.exports = {
         return rows[0];
     },
 
+    // Returns false when the download limit was already reached
     incrementShareDownloads: async (token) => {
-        await pool.execute('UPDATE shares SET download_count = download_count + 1 WHERE token = ?', [token]);
+        const [result] = await pool.execute(
+            'UPDATE shares SET download_count = download_count + 1 WHERE token = ? AND (max_downloads = 0 OR download_count < max_downloads)',
+            [token]
+        );
+        return result.affectedRows > 0;
+    },
+
+    getAllShareLimits: async () => {
+        const [rows] = await pool.execute('SELECT token, max_downloads, download_count, expires_at FROM shares');
+        return rows;
     },
 
     getSharesByUserId: async (userId) => {

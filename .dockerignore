@@ -6,3 +6,6 @@ data
 README.md
 shadow-drop.tar
 buzon.db*
+*.pem
+certs
+.env

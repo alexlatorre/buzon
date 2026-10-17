@@ -14,8 +14,9 @@ COPY server.js config.js db.js ./
 COPY db/ ./db/
 COPY public/ ./public/
 
-# Create data directory for volume mount
-RUN mkdir -p /app/data /app/certs
+# Create data directory for volume mount, owned by the unprivileged node user
+# (existing host volumes may need: chown -R 1000:1000 /path/to/data)
+RUN mkdir -p /app/data /app/certs && chown -R node:node /app/data /app/certs
 
 # Expose HTTPS port
 EXPOSE 4000
@@ -26,7 +27,10 @@ VOLUME ["/app/data"]
 # SSL certs — mount your Let's Encrypt certs here:
 #   -v /path/to/fullchain.pem:/app/certs/fullchain.pem
 #   -v /path/to/privkey.pem:/app/certs/privkey.pem
+# The container runs as uid 1000 (node): privkey.pem must be readable by that user.
 # If no certs are mounted, the server starts in HTTP mode.
 VOLUME ["/app/certs"]
+
+USER node
 
 CMD ["node", "server.js"]

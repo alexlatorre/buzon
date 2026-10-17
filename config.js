@@ -1,11 +1,13 @@
+// Settings come from environment variables so credentials never end up in git
 module.exports = {
     db: {
-        engine: 'sqlite', // 'sqlite' or 'mysql'
+        engine: process.env.DB_ENGINE || 'sqlite', // 'sqlite' or 'mysql'
         mysql: {
-            host: 'localhost',
-            user: 'root',
-            password: '',
-            database: 'buzon'
+            host: process.env.MYSQL_HOST || 'localhost',
+            port: Number(process.env.MYSQL_PORT) || 3306,
+            user: process.env.MYSQL_USER || 'root',
+            password: process.env.MYSQL_PASSWORD || '',
+            database: process.env.MYSQL_DATABASE || 'buzon'
         }
     }
 };

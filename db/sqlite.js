@@ -2,7 +2,11 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const dbPath = path.join(__dirname, '..', 'data', 'buzon.db');
+const fs = require('fs');
+
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+fs.mkdirSync(dataDir, { recursive: true });
+const dbPath = path.join(dataDir, 'buzon.db');
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
@@ -182,8 +186,9 @@ module.exports = {
         return db.prepare('SELECT * FROM users WHERE id = ?').get(link.user_id);
     },
 
+    // Returns true only for the request that actually flipped the token to used
     consumeToken: async (token) => {
-        db.prepare('UPDATE one_time_links SET is_used = 1 WHERE token = ?').run(token);
+        return db.prepare('UPDATE one_time_links SET is_used = 1 WHERE token = ? AND is_used = 0').run(token).changes > 0;
     },
 
     deleteOneTimeLink: async (token, userId) => {
@@ -203,8 +208,13 @@ module.exports = {
         return db.prepare('SELECT * FROM shares WHERE token = ?').get(token);
     },
 
+    // Returns false when the download limit was already reached
     incrementShareDownloads: async (token) => {
-        db.prepare('UPDATE shares SET download_count = download_count + 1 WHERE token = ?').run(token);
+        return db.prepare('UPDATE shares SET download_count = download_count + 1 WHERE token = ? AND (max_downloads = 0 OR download_count < max_downloads)').run(token).changes > 0;
+    },
+
+    getAllShareLimits: async () => {
+        return db.prepare('SELECT token, max_downloads, download_count, expires_at FROM shares').all();
     },
 
     getSharesByUserId: async (userId) => {

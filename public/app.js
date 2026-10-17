@@ -95,6 +95,28 @@ async function handleRegister() {
     }
 }
 
+// Decrypts the stored PKCS8 private key with the password-derived master key
+async function decryptPrivateKey(masterKey, encryptedPrivateKey, iv) {
+    let privKeyBuffer;
+    try {
+        privKeyBuffer = await CryptoUtils.decryptSymmetric(masterKey, encryptedPrivateKey, iv);
+    } catch (e) {
+        throw new Error('Invalid master password.');
+    }
+    return CryptoUtils.importPrivateKey(new TextDecoder().decode(privKeyBuffer));
+}
+
+async function postLogin(body) {
+    const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Invalid credentials');
+    return data;
+}
+
 async function handleLogin() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
@@ -118,31 +140,19 @@ async function handleLogin() {
 
         // 3. Authenticate with server using Server Auth Hash
         showMsg('Verifying credentials...', 'info');
-        const res = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, serverAuthHash })
-        });
+        let data = await postLogin({ username, serverAuthHash });
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Invalid credentials');
+        // Legacy account: prove we hold the private key so the server accepts our auth hash
+        if (data.migrationRequired) {
+            showMsg('Upgrading legacy account...', 'info');
+            const legacyKey = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
+            const nonce = await CryptoUtils.decryptAsymmetric(legacyKey, data.challenge);
+            data = await postLogin({ username, serverAuthHash, challengeResponse: CryptoUtils.bufferToBase64(nonce) });
+        }
 
         // 4. Decrypt Private Key
         showMsg('Decrypting private key in memory...', 'info');
-        let privKeyBuffer;
-        try {
-            console.log("MasterKey used:", masterKey);
-            console.log("EncPrivKey base64 length:", data.encryptedPrivateKey.length);
-            console.log("IV base64:", data.iv);
-            privKeyBuffer = await CryptoUtils.decryptSymmetric(masterKey, data.encryptedPrivateKey, data.iv);
-            console.log("Decrypted privKeyBuffer byteLength:", privKeyBuffer.byteLength);
-        } catch (e) {
-            console.error("AES Decryption Error:", e);
-            throw new Error('Invalid master password.');
-        }
-
-        const privKeyBase64 = new TextDecoder().decode(privKeyBuffer);
-        const privateKey = await CryptoUtils.importPrivateKey(privKeyBase64);
+        const privateKey = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
 
         // 4. Setup Global state and transition
         currentUser = {
@@ -262,7 +272,7 @@ function renderPackages() {
             </div>
             <div class="package-info">
                 <div class="package-header">
-                    <span class="package-sender">${pkg.sender_email}</span>
+                    <span class="package-sender"></span>
                     <span class="package-date">${formattedDate} at ${formattedTime}</span>
                 </div>
                 <div class="package-subheader">
@@ -280,6 +290,8 @@ function renderPackages() {
                 <span class="chevron-right">›</span>
             </div>
         `;
+        // Sender name is chosen by whoever dropped the package: never parse it as HTML
+        div.querySelector('.package-sender').textContent = pkg.sender_name || 'Anonymous';
         pkgList.appendChild(div);
     });
 }
@@ -301,7 +313,7 @@ async function openPackage(id) {
         const message = new TextDecoder().decode(msgBuffer);
 
         // 4. Fill Modal
-        document.getElementById('modal-sender').textContent = pkg.sender_email;
+        document.getElementById('modal-sender').textContent = pkg.sender_name || 'Anonymous';
         document.getElementById('modal-date').textContent = new Date(pkg.created_at).toLocaleString();
         document.getElementById('modal-message').textContent = message;
 
@@ -312,6 +324,9 @@ async function openPackage(id) {
             fileList.innerHTML = '<li>No attachments</li>';
             btnDownloadAll.style.display = 'none';
         } else {
+            for (const f of pkg.files) {
+                f.displayName = await decryptFileName(f.original_name);
+            }
             pkg.files.forEach(f => {
                 const li = document.createElement('li');
                 li.className = 'modal-file-item';
@@ -320,9 +335,10 @@ async function openPackage(id) {
                 fileInfo.className = 'modal-file-info';
                 fileInfo.innerHTML = `
                     <span class="file-icon">📄</span>
-                    <span class="file-name">${f.original_name}</span>
+                    <span class="file-name"></span>
                     <span class="file-size">(${(f.size / 1024).toFixed(2)} KB)</span>
                 `;
+                fileInfo.querySelector('.file-name').textContent = f.displayName;
 
                 const downloadBtn = document.createElement('button');
                 downloadBtn.className = 'btn-icon-download';
@@ -426,7 +442,7 @@ async function downloadFile(f) {
         const decryptedBuffer = await CryptoUtils.decryptSymmetric(currentPackageSessionKey, payload.ciphertext, payload.iv);
 
         // Metadata restoration
-        const resolvedFilename = payload.filename || f.original_name;
+        const resolvedFilename = payload.filename || f.displayName;
         const resolvedMime = payload.mimeType || f.mime_type || 'application/octet-stream';
 
         const decBlob = new Blob([decryptedBuffer], { type: resolvedMime });
@@ -440,7 +456,20 @@ async function downloadFile(f) {
         URL.revokeObjectURL(url);
     } catch (e) {
         console.error(e);
-        alert(`Failed to decrypt file: ${f.original_name}`);
+        alert(`Failed to decrypt file: ${f.displayName}`);
+    }
+}
+
+// Drop pages send file names encrypted with the package session key ("enc:<iv>:<ciphertext>");
+// older packages still have them in clear text
+async function decryptFileName(storedName) {
+    if (!storedName || !storedName.startsWith('enc:')) return storedName;
+    const [, iv, ciphertext] = storedName.split(':');
+    try {
+        const nameBuffer = await CryptoUtils.decryptSymmetric(currentPackageSessionKey, ciphertext, iv);
+        return new TextDecoder().decode(nameBuffer);
+    } catch {
+        return 'encrypted-file';
     }
 }
 

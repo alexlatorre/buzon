@@ -147,10 +147,15 @@ btnSubmit.addEventListener('click', async () => {
         if (selectedFiles.length > 0) {
             showMsg(`Encrypting ${selectedFiles.length} file(s) locally...`, 'info');
         }
+        const encryptedNames = [];
         for (let i = 0; i < selectedFiles.length; i++) {
             const file = selectedFiles[i];
             const arrayBuffer = await file.arrayBuffer();
             const encObj = await CryptoUtils.encryptSymmetric(sessionKey, arrayBuffer);
+
+            // The server only ever sees the encrypted name
+            const encName = await CryptoUtils.encryptSymmetric(sessionKey, new TextEncoder().encode(file.name));
+            encryptedNames.push(`enc:${encName.iv}:${encName.ciphertext}`);
 
             const payloadStr = JSON.stringify({
                 ciphertext: encObj.ciphertext,
@@ -159,9 +164,9 @@ btnSubmit.addEventListener('click', async () => {
                 mimeType: file.type
             });
             const blob = new Blob([payloadStr], { type: 'application/json' });
-            // Keep original file name but with the encrypted blob content
-            formData.append('files', blob, file.name);
+            formData.append('files', blob, 'encrypted.bin');
         }
+        formData.append('fileNames', JSON.stringify(encryptedNames));
 
         // 6. Transmit to Server
         showMsg('Transmitting secure payload to the server...', 'info');

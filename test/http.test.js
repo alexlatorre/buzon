@@ -1,0 +1,58 @@
+const { test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const { startServer } = require('./helpers');
+
+let server;
+
+before(async () => {
+    server = await startServer({ AUTH_RATE_LIMIT: '3' });
+});
+
+after(async () => {
+    await server.stop();
+});
+
+test('security headers are set', async () => {
+    const res = await fetch(`${server.base}/`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-security-policy'), /script-src 'self'/);
+    assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(res.headers.get('x-frame-options'), 'DENY');
+    assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+});
+
+test('integrity endpoint lists the 10 frontend files', async () => {
+    const { files } = await (await fetch(`${server.base}/api/integrity`)).json();
+    assert.equal(Object.keys(files).length, 10);
+    for (const hash of Object.values(files)) assert.match(hash, /^[0-9a-f]{64}$/);
+});
+
+test('auth endpoints are rate limited', async () => {
+    const statuses = [];
+    for (let i = 0; i < 5; i++) statuses.push((await fetch(`${server.base}/api/auth/salt/someone`)).status);
+    assert.deepEqual(statuses.slice(0, 3), [200, 200, 200]);
+    assert.equal(statuses[4], 429);
+});
+
+test('with TRUST_PROXY=false a spoofed X-Forwarded-For does not dodge the limit', async () => {
+    const direct = await startServer({ AUTH_RATE_LIMIT: '2', TRUST_PROXY: 'false' });
+    try {
+        const get = ip => fetch(`${direct.base}/api/auth/salt/someone`, { headers: { 'X-Forwarded-For': ip } }).then(r => r.status);
+        assert.equal(await get('203.0.113.1'), 200);
+        assert.equal(await get('203.0.113.2'), 200);
+        assert.equal(await get('203.0.113.3'), 429);
+    } finally {
+        await direct.stop();
+    }
+});
+
+test('README trusted hashes match the files being served', async () => {
+    const fs = require('fs');
+    const path = require('path');
+    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+    const documented = Object.fromEntries([...readme.matchAll(/^\| `([\w.]+)` \| `([0-9a-f]{64})` \|$/gm)].map(m => [m[1], m[2]]));
+    const { files } = await (await fetch(`${server.base}/api/integrity`)).json();
+    assert.deepEqual(documented, files);
+});
