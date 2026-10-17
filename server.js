@@ -77,6 +77,10 @@ function fakeSaltFor(username) {
 // The nonce is encrypted under its own OAEP label so the browser cannot be used to decrypt anything
 // else (package session keys have no label), and the client answers with a hash of the nonce.
 // Both strings must match public/crypto.js.
+// Migrating a legacy account means handing its encrypted private key to whoever asks for the username
+// (there is nothing else to check the password against), which allows offline guessing. So it is
+// closed by default; set LEGACY_MIGRATION=open for as long as legacy owners need to log in once.
+const LEGACY_MIGRATION_OPEN = process.env.LEGACY_MIGRATION === 'open';
 const MIGRATION_CHALLENGE_LABEL = Buffer.from('shadowdrop/migration-challenge/v1');
 const MIGRATION_RESPONSE_PREFIX = Buffer.from('shadowdrop/migration-response/v1');
 // Keyed by a random id per attempt, so one login attempt can only consume its own challenge and a
@@ -488,6 +492,11 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         if (user.server_auth_hash === LEGACY_AUTH_MARKER) {
+            if (!LEGACY_MIGRATION_OPEN) {
+                // Same answer as a wrong password, so legacy accounts cannot be told apart
+                console.warn(`[Auth] Legacy account ${user.id} tried to log in; migration is closed (LEGACY_MIGRATION=open allows it)`);
+                return res.status(401).json({ error: 'Invalid credentials' });
+            }
             // Legacy account: only accept the new hash from whoever can decrypt with the account's private key
             const pending = typeof challengeId === 'string' ? migrationChallenges.get(challengeId) : undefined;
             if (typeof challengeResponse !== 'string' || !pending || pending.userId !== user.id || pending.expiresAt < Date.now()) {

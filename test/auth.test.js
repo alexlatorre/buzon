@@ -10,7 +10,7 @@ const CryptoUtils = loadCryptoUtils();
 let server, api, db;
 
 before(async () => {
-    server = await startServer();
+    server = await startServer({ LEGACY_MIGRATION: 'open' });
     api = client(server.base);
     db = new Database(path.join(server.dataDir, 'buzon.db'));
 });

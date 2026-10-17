@@ -75,7 +75,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 
 - **End-to-end encryption**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iterations).
 - **Auth hash at rest**: the database keeps a hash of the login token, so a leaked database cannot be replayed to log in.
-- **Legacy account migration with proof of key**: accounts created before the auth hash existed are only upgraded when the client decrypts a random challenge encrypted with the account's public key.
+- **Legacy account migration, closed by default**: accounts created before the auth hash existed cannot log in unless `LEGACY_MIGRATION=open`; then they are upgraded only when the browser decrypts a labelled challenge encrypted with the account's public key, and answers with a hash of it.
 - **Sessions**: random bearer tokens (`Authorization: Bearer`), 24 h lifetime, ownership checked on every user resource (packages, files, shares, links).
 - **Strict CSP and headers**: `script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, HSTS, `nosniff`, `no-referrer`, `no-store`, no CORS.
 - **Untrusted data rendered as text**: sender names and file names never go through `innerHTML`.
@@ -131,6 +131,7 @@ All settings are environment variables; nothing secret lives in the repository.
 | `MYSQL_DATABASE` | `buzon` | MySQL database name. |
 | `TLS` | *(on)* | `off` forces plain HTTP even if certificates exist (TLS terminated by a proxy). |
 | `TRUST_PROXY` | `1` with `TLS=off`, otherwise `false` | Express `trust proxy` setting: the number of proxies in front of the app, or `false`. Only set it when a proxy really sits in front, otherwise clients can forge `X-Forwarded-For` and bypass rate limits. `true` is refused at startup. |
+| `LEGACY_MIGRATION` | closed | `open` lets accounts created before the login hash existed migrate on their next login. While open, anyone who knows such a username can fetch its encrypted private key and guess the password offline, so open it only as long as needed. |
 | `AUTH_RATE_LIMIT` | `20` | Auth requests per IP every 15 minutes. |
 | `API_RATE_LIMIT` | `200` | Other API requests per IP every 15 minutes (login has its own limit). |
 | `REQUEST_TIMEOUT_MS` | `1800000` (30 min) | Time allowed for a whole request; raise it for very large uploads over slow links. |
@@ -205,7 +206,7 @@ The suite (`test/`, Node's built-in test runner, no extra dependencies) starts r
 ## ⬆️ Upgrading from earlier versions
 
 - **Auth hashes**: existing rows are re-hashed automatically on each user's next login.
-- **Legacy accounts** (`LEGACY_MIGRATION_REQUIRED`): the next login transparently answers a key-possession challenge; no action needed.
+- **Legacy accounts** (`LEGACY_MIGRATION_REQUIRED`): they cannot log in by default. Start the server with `LEGACY_MIGRATION=open`, let their owners log in once (the browser answers a key-possession challenge), then remove the variable.
 - **MySQL**: missing `users` columns are added on startup.
 - **Configuration**: `config.js` no longer holds credentials; move them to the environment variables above.
 - **Docker**: the image now runs as uid 1000; fix volume and key permissions as described in [Docker](#-docker).
@@ -273,7 +274,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 - **Cifrado de extremo a extremo**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iteraciones).
 - **El servidor no ve** contraseñas, claves, mensajes, contenido de ficheros ni (en los envíos) sus nombres.
 - **Hash de autenticación protegido**: la base de datos guarda un hash del token de login; si se filtra, no sirve para entrar.
-- **Migración de cuentas antiguas con prueba de clave**: solo se actualizan si el navegador descifra un reto cifrado con la clave pública de la cuenta.
+- **Migración de cuentas antiguas, cerrada por defecto**: no pueden entrar salvo con `LEGACY_MIGRATION=open`; entonces solo se actualizan si el navegador descifra un reto cifrado con la clave pública de la cuenta.
 - **Sesiones** con token `Bearer` de 24 h y comprobación de propietario en paquetes, ficheros, shares y enlaces.
 - **CSP estricta y cabeceras** (HSTS, `nosniff`, `no-referrer`, sin iframes, sin CORS). Los nombres de remitente y de fichero se pintan siempre como texto.
 - **Límites de peticiones** por IP; `X-Forwarded-For` solo se tiene en cuenta si se configura `TRUST_PROXY`.
