@@ -1180,11 +1180,11 @@ if (sslCerts) {
             console.log(`  SSL cert: ${path.basename(sslCerts.cert)}, key: ${path.basename(sslCerts.key)}`);
         });
     } catch (err) {
-        console.error('SSL certificate error:', err.message);
-        console.log('Falling back to HTTP...');
-        http.createServer(serverOptions, app).listen(PORT, () => {
-            console.log(`Buzon HTTP server running at http://localhost:${PORT}`);
-        });
+        // Fail closed: falling back to plain HTTP here would serve cleartext on the port the operator
+        // believes is HTTPS (e.g. a root-only privkey.pem mounted into the container)
+        console.error(`TLS certificates found (${sslCerts.cert}, ${sslCerts.key}) but unusable: ${err.message}`);
+        console.error('Fix their permissions or contents, or set TLS=off to serve plain HTTP behind a TLS-terminating proxy.');
+        process.exit(1);
     }
 } else {
     // Fallback to HTTP for dev or if running behind a proxy

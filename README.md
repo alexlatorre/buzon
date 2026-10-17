@@ -139,7 +139,7 @@ All settings are environment variables; nothing secret lives in the repository.
 | `ORPHAN_GRACE_MS` | `3600000` (1 h) | Age after which upload files with no database row are deleted by the hourly cleanup. |
 
 ### TLS certificates
-The server looks for, in order: `certs/fullchain.pem` + `certs/privkey.pem`, `fullchain.pem` + `privkey.pem`, `cert.pem` + `key.pem`. If none are found (or `TLS=off`) it serves HTTP, which is the right setup behind a reverse proxy that handles TLS. Certificates and keys are git-ignored.
+The server looks for, in order: `certs/fullchain.pem` + `certs/privkey.pem`, `fullchain.pem` + `privkey.pem`, `cert.pem` + `key.pem`. If none are found (or `TLS=off`) it serves HTTP, which is the right setup behind a reverse proxy that handles TLS. If certificates are found but cannot be used (unreadable key, bad PEM, mismatched pair) the server refuses to start instead of falling back to HTTP. Certificates and keys are git-ignored.
 
 ---
 

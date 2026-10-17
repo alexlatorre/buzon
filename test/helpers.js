@@ -166,4 +166,38 @@ function client(base) {
     return { json, register, login, drop, share, shareFields };
 }
 
-module.exports = { startServer, client, aesDecrypt, b64 };
+
+// Runs server.js from a copy outside the repo, so local certificates there are not picked up.
+// `files` adds files to the copy (e.g. certificates); TLS and TRUST_PROXY are unset unless given.
+async function startServerCopy(env, files = {}) {
+    const repo = path.join(__dirname, '..');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buzon-copy-'));
+    for (const item of ['server.js', 'config.js', 'db.js', 'db', 'public']) {
+        fs.cpSync(path.join(repo, item), path.join(dir, item), { recursive: true });
+    }
+    for (const [name, content] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+        fs.writeFileSync(path.join(dir, name), content);
+    }
+    const port = await freePort();
+    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: path.join(dir, 'data'), NODE_PATH: path.join(repo, 'node_modules'), DB_ENGINE: 'sqlite', ...env };
+    for (const key of ['TLS', 'TRUST_PROXY']) if (!(key in env)) delete childEnv[key];
+    const proc = spawn(process.execPath, ['server.js'], { cwd: dir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    const exited = new Promise(resolve => proc.on('exit', code => resolve(code)));
+    const started = await new Promise(resolve => {
+        const onData = chunk => { output += chunk; if (output.includes('server running at')) resolve(true); };
+        proc.stdout.on('data', onData);
+        proc.stderr.on('data', onData);
+        exited.then(() => resolve(false));
+    });
+    return {
+        started, exited, output: () => output, base: `http://localhost:${port}`,
+        async stop() {
+            if (started) { proc.kill(); await exited; }
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    };
+}
+
+module.exports = { startServer, startServerCopy, client, aesDecrypt, b64 };

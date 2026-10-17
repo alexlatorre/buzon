@@ -2,44 +2,7 @@
 // operator says a proxy is in front (TRUST_PROXY, or TLS=off, the documented proxy mode).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const net = require('net');
-const os = require('os');
-const path = require('path');
-
-const REPO = path.join(__dirname, '..');
-
-const freePort = () => new Promise(resolve => {
-    const srv = net.createServer().listen(0, () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
-});
-
-// Runs server.js from a copy outside the repo, so local certificates there are not picked up
-async function startCopy(env) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buzon-proxy-'));
-    for (const item of ['server.js', 'config.js', 'db.js', 'db', 'public']) {
-        fs.cpSync(path.join(REPO, item), path.join(dir, item), { recursive: true });
-    }
-    const port = await freePort();
-    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: path.join(dir, 'data'), NODE_PATH: path.join(REPO, 'node_modules'), DB_ENGINE: 'sqlite', ...env };
-    for (const key of ['TLS', 'TRUST_PROXY']) if (!(key in env)) delete childEnv[key];
-    const proc = spawn(process.execPath, ['server.js'], { cwd: dir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-    let output = '';
-    const exited = new Promise(resolve => proc.on('exit', code => resolve(code)));
-    const started = await new Promise(resolve => {
-        const onData = chunk => { output += chunk; if (output.includes('server running at')) resolve(true); };
-        proc.stdout.on('data', onData);
-        proc.stderr.on('data', onData);
-        exited.then(() => resolve(false));
-    });
-    return {
-        started, exited, output: () => output, base: `http://localhost:${port}`,
-        async stop() {
-            if (started) { proc.kill(); await exited; }
-            fs.rmSync(dir, { recursive: true, force: true });
-        }
-    };
-}
+const { startServerCopy: startCopy } = require('./helpers');
 
 // Three requests from three spoofed addresses with a limit of 2: was the third one limited?
 async function spoofingDodgesLimit(base) {
