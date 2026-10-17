@@ -144,16 +144,26 @@ function client(base) {
         return { status: res.status, data: await res.json().catch(() => null), sessionKey };
     }
 
-    async function share(userId, token, { size = 100, maxDownloads = 0, expiresIn = '0' } = {}) {
+    // Field sizes match public/app.js: wrapped AES-256 key (32 + 16 tag), 12-byte IVs, 16-byte salt
+    const randomB64 = bytes => b64(globalThis.crypto.getRandomValues(new Uint8Array(bytes)));
+    function shareFields({ maxDownloads = 0, expiresIn = '0' } = {}) {
+        return {
+            encryptedFileKey: randomB64(48), keyIv: randomB64(12), salt: randomB64(16), fileIv: randomB64(12),
+            originalName: 'x.bin', mimeType: 'application/octet-stream', maxDownloads: String(maxDownloads), expiresIn: String(expiresIn)
+        };
+    }
+
+    async function share(userId, token, { size = 100, maxDownloads = 0, expiresIn = '0', fields: override = {}, extra = [] } = {}) {
         const form = new FormData();
         form.append('file', new Blob([new Uint8Array(size)]), 'encrypted.bin');
-        const fields = { encryptedFileKey: 'a', keyIv: 'b', salt: 'c', fileIv: 'd', originalName: 'x.bin', maxDownloads: String(maxDownloads), expiresIn };
-        for (const [k, v] of Object.entries(fields)) form.append(k, v);
+        const fields = { ...shareFields({ maxDownloads, expiresIn }), ...override };
+        for (const [k, v] of Object.entries(fields)) if (v !== undefined) form.append(k, v);
+        for (const [k, v] of extra) form.append(k, v);
         const res = await fetch(`${base}/api/share/${userId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
         return { status: res.status, data: await res.json().catch(() => null) };
     }
 
-    return { json, register, login, drop, share };
+    return { json, register, login, drop, share, shareFields };
 }
 
 module.exports = { startServer, client, aesDecrypt, b64 };

@@ -53,8 +53,8 @@ test('a plaintext multipart filename is never stored', async () => {
     // An old or hand-made client that sends the real name and type and no encrypted names
     const form = new FormData();
     form.append('senderName', 'old client');
-    form.append('encryptedSessionKey', 'AAAA');
-    form.append('encryptedMessage', 'AAAA');
+    form.append('encryptedSessionKey', 'A'.repeat(342) + '=='); // 256 bytes, an RSA-2048 key
+    form.append('encryptedMessage', 'A'.repeat(24));
     form.append('messageIv', 'AAAAAAAAAAAAAAAA');
     form.append('files', new Blob(['x'], { type: 'text/plain' }), 'informe-confidencial.txt');
     const res = await fetch(`${server.base}/api/drop/${alice.id}`, { method: 'POST', body: form });

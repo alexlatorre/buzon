@@ -157,12 +157,14 @@ module.exports = {
     },
 
     getUserMailboxUsage: async (userId) => {
+        // Files plus encrypted messages, so message-only packages also count
         const result = db.prepare(`
-            SELECT SUM(pf.size) as totalSize 
-            FROM package_files pf
-            JOIN packages p ON pf.package_id = p.id
-            WHERE p.user_id = ? AND p.status = 'pending'
-        `).get(userId);
+            SELECT
+                COALESCE((SELECT SUM(pf.size) FROM package_files pf JOIN packages p ON pf.package_id = p.id
+                          WHERE p.user_id = ? AND p.status = 'pending'), 0)
+              + COALESCE((SELECT SUM(LENGTH(encrypted_message)) FROM packages
+                          WHERE user_id = ? AND status = 'pending'), 0) AS totalSize
+        `).get(userId, userId);
         return result.totalSize || 0;
     },
 

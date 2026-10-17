@@ -191,12 +191,14 @@ module.exports = {
     },
 
     getUserMailboxUsage: async (userId) => {
+        // Files plus encrypted messages, so message-only packages also count
         const [rows] = await pool.execute(`
-            SELECT SUM(pf.size) as totalSize 
-            FROM package_files pf
-            JOIN packages p ON pf.package_id = p.id
-            WHERE p.user_id = ? AND p.status = 'pending'
-        `, [userId]);
+            SELECT
+                COALESCE((SELECT SUM(pf.size) FROM package_files pf JOIN packages p ON pf.package_id = p.id
+                          WHERE p.user_id = ? AND p.status = 'pending'), 0)
+              + COALESCE((SELECT SUM(LENGTH(encrypted_message)) FROM packages
+                          WHERE user_id = ? AND status = 'pending'), 0) AS totalSize
+        `, [userId, userId]);
         // SUM() comes back as a DECIMAL string from mysql2
         return Number(rows[0].totalSize) || 0;
     },

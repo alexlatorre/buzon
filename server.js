@@ -231,9 +231,63 @@ const dropStorage = multer.diskStorage({
     }
 });
 const MAX_DROP_FILES = 20;
+// Largest multipart text field: the encrypted message (base64 of up to MAX_MESSAGE_BYTES)
+const MAX_MESSAGE_BYTES = 256 * 1024;
+const MAX_FIELD_SIZE = 360 * 1024;
+
+// --- Upload field validation ---
+// Multipart fields arrive as strings; a repeated field becomes an array, which must be refused too.
+const BASE64_REGEX = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+// Decoded size of a canonical base64 string, or -1 if it is not one
+function base64Bytes(value) {
+    if (typeof value !== 'string' || !BASE64_REGEX.test(value)) return -1;
+    return Buffer.from(value, 'base64').length;
+}
+
+// Whole number in [min, max]; missing or empty means 0; anything else is null
+function intField(value, min, max) {
+    if (value === undefined || value === '') return 0;
+    if (typeof value !== 'string' || !/^\d{1,6}$/.test(value)) return null;
+    const n = Number(value);
+    return n >= min && n <= max ? n : null;
+}
+
+const optionalString = (value, maxLength) => value === undefined || (typeof value === 'string' && value.length <= maxLength);
+
+// RSA-OAEP session key (2048, 3072 or 4096-bit key), 12-byte GCM IV, message = ciphertext + 16-byte tag
+function dropFieldsError(body, fileCount) {
+    if (![256, 384, 512].includes(base64Bytes(body.encryptedSessionKey))) return 'Invalid session key';
+    if (base64Bytes(body.messageIv) !== 12) return 'Invalid message IV';
+    const messageBytes = base64Bytes(body.encryptedMessage);
+    if (messageBytes < 16 || messageBytes > MAX_MESSAGE_BYTES + 16) return 'Invalid message';
+    if (fileCount === 0 && messageBytes === 16) return 'Nothing to send';
+    if (!optionalString(body.senderName, 256)) return 'Invalid sender name';
+    if (!optionalString(body.fileNames, MAX_FIELD_SIZE)) return 'Invalid file names';
+    return null;
+}
+
+// Wrapped AES-256 key (32 + 16 tag), 12-byte IVs, 16-byte PBKDF2 salt, values the dashboard offers
+function shareFieldsError(body) {
+    if (base64Bytes(body.encryptedFileKey) !== 48) return 'Invalid file key';
+    if (base64Bytes(body.keyIv) !== 12 || base64Bytes(body.fileIv) !== 12) return 'Invalid IV';
+    if (base64Bytes(body.salt) !== 16) return 'Invalid salt';
+    if (typeof body.originalName !== 'string' || !body.originalName || body.originalName.length > 255) return 'Invalid file name';
+    if (!optionalString(body.mimeType, 255)) return 'Invalid file type';
+    if (body.encryptedMessage !== undefined) {
+        const messageBytes = base64Bytes(body.encryptedMessage);
+        if (messageBytes < 16 || messageBytes > MAX_MESSAGE_BYTES + 16) return 'Invalid message';
+        if (base64Bytes(body.messageIv) !== 12) return 'Invalid message IV';
+    } else if (body.messageIv !== undefined) {
+        return 'Invalid message IV';
+    }
+    if (intField(body.maxDownloads, 0, 1000) === null) return 'maxDownloads must be 0-1000';
+    if (intField(body.expiresIn, 0, 8760) === null) return 'expiresIn must be 0-8760 hours';
+    return null;
+}
 const upload = multer({
     storage: dropStorage,
-    limits: { fileSize: 50 * 1024 * 1024, files: MAX_DROP_FILES, fields: 10 } // 50MB max per file
+    limits: { fileSize: 50 * 1024 * 1024, files: MAX_DROP_FILES, fields: 10, fieldSize: MAX_FIELD_SIZE } // 50MB max per file
 });
 
 function removeUploadedFiles(req) {
@@ -537,17 +591,24 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
     try {
         const { user, isToken } = req.dropTarget;
         const userId = user.id;
-        let { senderName, encryptedSessionKey, encryptedMessage, messageIv } = req.body;
         const files = req.files || [];
+
+        // Validate every field before anything is stored or the one-time link is used
+        const fieldError = dropFieldsError(req.body, files.length);
+        if (fieldError) {
+            removeUploadedFiles(req);
+            return res.status(400).json({ error: fieldError });
+        }
+        let { senderName, encryptedSessionKey, encryptedMessage, messageIv } = req.body;
 
         // Keep the name as typed (the UI renders it as text); just cap length and drop control characters
         if (senderName) {
             senderName = String(senderName).replace(/[\u0000-\u001f\u007f]/g, '').trim().substring(0, 64);
         }
 
-        // Validate Quota again with the real sizes (Content-Length may be absent)
+        // Validate Quota again with the real sizes, message included
         const used = await getStorageUsage(userId);
-        const incomingSize = files.reduce((acc, f) => acc + f.size, 0);
+        const incomingSize = files.reduce((acc, f) => acc + f.size, 0) + encryptedMessage.length;
         if (used + incomingSize > user.mailbox_quota) {
             removeUploadedFiles(req);
             return res.status(413).json({ error: 'Mailbox quota exceeded' });
@@ -562,18 +623,26 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
         // Create the package in db
         const packageId = await db.createPackage(userId, senderName, encryptedSessionKey, encryptedMessage, messageIv);
 
-        // Register files and rename them to standard format
+        // Register files and rename them to standard format; on any failure undo the whole package
         const encryptedNames = parseEncryptedNames(req.body.fileNames);
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            const encName = encryptedNames[i];
-            // Only encrypted names are stored; the multipart filename and type are client-chosen plaintext
-            const storedName = typeof encName === 'string' && encName.length <= 2048 && ENC_NAME_REGEX.test(encName)
-                ? encName
-                : UNNAMED_FILE;
-            const packageFileId = await db.addPackageFile(packageId, storedName, STORED_FILE_TYPE, file.size);
-            const newPath = path.join(DROP_DIR, `${packageId}_${packageFileId}`);
-            fs.renameSync(file.path, newPath);
+        const storedPaths = [];
+        try {
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const encName = encryptedNames[i];
+                // Only encrypted names are stored; the multipart filename and type are client-chosen plaintext
+                const storedName = typeof encName === 'string' && encName.length <= 2048 && ENC_NAME_REGEX.test(encName)
+                    ? encName
+                    : UNNAMED_FILE;
+                const packageFileId = await db.addPackageFile(packageId, storedName, STORED_FILE_TYPE, file.size);
+                const newPath = path.join(DROP_DIR, `${packageId}_${packageFileId}`);
+                fs.renameSync(file.path, newPath);
+                storedPaths.push(newPath);
+            }
+        } catch (error) {
+            storedPaths.forEach(p => { try { fs.unlinkSync(p); } catch { } });
+            await db.deletePackage(packageId).catch(() => {});
+            throw error;
         }
 
         res.json({ success: true, packageId });
@@ -665,7 +734,7 @@ const shareStorage = multer.diskStorage({
         cb(null, uniqueName);
     }
 });
-const shareUpload = multer({ storage: shareStorage, limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 20 } }); // 100MB max
+const shareUpload = multer({ storage: shareStorage, limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 20, fieldSize: MAX_FIELD_SIZE } }); // 100MB max
 
 // 8. Create Share (Upload encrypted file)
 // Runs before multer: ownership, declared size and quota, so nothing is written for a refused share
@@ -698,12 +767,17 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
             removeUploadedFiles(req);
             return res.status(403).json({ error: 'Forbidden' });
         }
-        const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv, maxDownloads, expiresIn } = req.body;
-
-        if (!req.file || !encryptedFileKey || !keyIv || !salt || !fileIv || !originalName) {
-            removeUploadedFiles(req);
-            return res.status(400).json({ error: 'Missing required fields' });
+        if (!req.file) {
+            return res.status(400).json({ error: 'Missing file' });
         }
+        const fieldError = shareFieldsError(req.body);
+        if (fieldError) {
+            removeUploadedFiles(req);
+            return res.status(400).json({ error: fieldError });
+        }
+        const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv } = req.body;
+        const maxDownloads = intField(req.body.maxDownloads, 0, 1000);
+        const expiresIn = intField(req.body.expiresIn, 0, 8760);
 
         const token = crypto.randomUUID();
 
@@ -720,25 +794,21 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
             return res.status(413).json({ error: 'Storage quota exceeded' });
         }
 
-        // Calculate expiry date
-        let expiresAt = null;
-        if (expiresIn && expiresIn !== '0') {
-            const hours = parseInt(expiresIn);
-            if (hours > 0) {
-                expiresAt = new Date(Date.now() + hours * 3600000).toISOString();
-            }
-        }
+        const expiresAt = expiresIn > 0 ? new Date(Date.now() + expiresIn * 3600000).toISOString() : null;
 
-        // Rename file to token-based name
-        const finalPath = path.join(SHARE_DIR, `${token}.enc`);
-        fs.renameSync(req.file.path, finalPath);
-
+        // Row first, then the file: a failed insert leaves only the temp file, which is removed below
         await db.createShare(
             userId, token, encryptedFileKey, keyIv, salt, fileIv,
             originalName, mimeType || 'application/octet-stream', req.file.size,
             encryptedMessage || null, messageIv || null,
-            parseInt(maxDownloads) || 0, expiresAt
+            maxDownloads, expiresAt
         );
+        try {
+            fs.renameSync(req.file.path, path.join(SHARE_DIR, `${token}.enc`));
+        } catch (error) {
+            await db.deleteShare(token).catch(() => {});
+            throw error;
+        }
 
         res.json({ success: true, token });
     } catch (error) {
