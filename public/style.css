@@ -359,6 +359,26 @@ input:focus, textarea:focus {
   background: #e8e8ed;
 }
 
+.share-item {
+  flex-wrap: wrap;
+  cursor: default;
+}
+
+.share-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.share-item-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.share-item-meta {
+  color: var(--text-muted, #86868b);
+  font-size: 0.6875rem;
+}
+
 .otl-token {
   font-family: monospace;
   overflow: hidden;

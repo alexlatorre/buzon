@@ -200,6 +200,7 @@ async function handleLogin() {
         fetchPackages();
         updateQuotaDisplay(); // Fetch quota and config on login
         fetchOneTimeLinks(); // Fetch OTLs on login
+        fetchShares();
 
     } catch (error) {
         console.error(error);
@@ -227,6 +228,7 @@ function secureLogout() {
         currentPackages = [];
         selectedPackage = null;
         currentPackageSessionKey = null;
+        shareListUI.replaceChildren();
 
         // 2. Clear form fields
         document.getElementById('password').value = '';
@@ -628,6 +630,86 @@ btnGenOTL.addEventListener('click', async () => {
     }
 });
 
+// --- My Shares: list, copy link, delete (shares count against the quota) ---
+const shareListUI = document.getElementById('share-list');
+
+async function fetchShares() {
+    if (!currentUser || !currentUser.id) return;
+    try {
+        const res = await fetch(`/api/shares/${currentUser.id}`, {
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        });
+        if (res.ok) renderShares(await res.json());
+    } catch (e) {
+        console.error('Failed to fetch shares', e);
+    }
+}
+
+function renderShares(shares) {
+    shareListUI.replaceChildren();
+    if (shares.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'quota-label';
+        empty.style.textAlign = 'center';
+        empty.style.padding = '10px';
+        empty.textContent = 'No active shares';
+        shareListUI.appendChild(empty);
+        return;
+    }
+
+    shares.forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'otl-item share-item';
+
+        const info = document.createElement('div');
+        info.className = 'share-item-info';
+        const name = document.createElement('div');
+        name.className = 'share-item-name';
+        name.textContent = s.original_name;
+        const meta = document.createElement('div');
+        meta.className = 'share-item-meta';
+        const downloads = s.max_downloads > 0 ? `${s.download_count}/${s.max_downloads} downloads` : `${s.download_count} downloads`;
+        const expiry = s.expires_at ? `expires ${formatDateTime(parseServerDate(s.expires_at))}` : 'no expiry';
+        meta.textContent = `${(s.size / (1024 * 1024)).toFixed(1)} MB · ${downloads} · ${expiry}`;
+        info.append(name, meta);
+
+        const actions = document.createElement('div');
+        actions.className = 'otl-actions';
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-icon-mini';
+        copyBtn.title = 'Copy link';
+        copyBtn.textContent = '📋';
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(`${window.location.origin}/share.html?token=${s.token}`)
+                .then(() => { copyBtn.textContent = '✓'; setTimeout(() => copyBtn.textContent = '📋', 1500); })
+                .catch(() => alert('Could not copy the link.'));
+        };
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn-icon-mini delete-otl';
+        deleteBtn.title = 'Delete share';
+        deleteBtn.textContent = '×';
+        deleteBtn.onclick = async () => {
+            if (!confirm('Delete this share? The link will stop working.')) return;
+            try {
+                const res = await fetch(`/api/share/${s.token}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            } catch (err) {
+                console.error('Failed to delete share', err);
+                alert('Could not delete the share.');
+            }
+            fetchShares();
+            updateQuotaDisplay();
+        };
+        actions.append(copyBtn, deleteBtn);
+
+        item.append(info, actions);
+        shareListUI.appendChild(item);
+    });
+}
+
 async function fetchOneTimeLinks() {
     if (!currentUser) return;
     try {
@@ -916,6 +998,8 @@ async function handleShareUpload() {
         shareStepForm.classList.add('hidden');
         shareFooterForm.classList.add('hidden');
         shareStepResult.classList.remove('hidden');
+        fetchShares();
+        updateQuotaDisplay();
 
     } catch (error) {
         console.error('Share upload error:', error);

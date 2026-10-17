@@ -105,3 +105,29 @@ test('uploading two files to a share is rejected as JSON', async () => {
     assert.equal(res.status, 413);
     assert.ok((await res.json()).error);
 });
+
+test('the owner can list their shares and nobody else can', async () => {
+    const { data } = await api.share(alice.id, alice.token, { maxDownloads: 5, expiresIn: '24' });
+    const list = await api.json('GET', `/api/shares/${alice.id}`, null, alice.token);
+    assert.equal(list.status, 200);
+    const mine = list.data.find(s => s.token === data.token);
+    assert.ok(mine);
+    assert.equal(mine.max_downloads, 5);
+    assert.equal(mine.download_count, 0);
+    assert.ok(mine.expires_at);
+    assert.equal((await api.json('GET', `/api/shares/${alice.id}`, null, bob.token)).status, 403);
+    assert.equal((await api.json('GET', `/api/shares/${alice.id}`)).status, 401);
+});
+
+test('the dashboard lists shares with a delete button, as text', () => {
+    const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+    assert.match(html, /id="share-list"/);
+    const render = app.slice(app.indexOf('function renderShares('), app.indexOf('function renderShares(') + 3000);
+    assert.match(app, /fetch\(`\/api\/shares\/\$\{currentUser\.id\}`/);
+    assert.match(render, /\.textContent = s\.original_name/);
+    assert.match(render, /method: 'DELETE'/);
+    assert.doesNotMatch(render, /innerHTML\s*=\s*`[^`]*\$\{/);
+    const logout = app.slice(app.indexOf('function secureLogout('), app.indexOf('function secureLogout(') + 2500);
+    assert.match(logout, /shareListUI\.replaceChildren\(\)/);
+});
