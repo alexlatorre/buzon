@@ -16,9 +16,36 @@ const CryptoUtils = {
         return Uint8Array.from(binString, (m) => m.codePointAt(0)).buffer;
     },
 
+    // Key derivation of an account, stored with it: "pbkdf2-sha256:<iterations>". Raising the default
+    // applies to new accounts and password changes; existing accounts keep logging in with theirs
+    KDF_DEFAULT: "pbkdf2-sha256:600000",
+    KDF_MIN_ITERATIONS: 600000,
+    KDF_MAX_ITERATIONS: 10000000,
+
+    // Iterations of a descriptor from the server. Anything unknown or weaker than the minimum is
+    // refused, so a malicious server cannot ask for a cheap hash of the password
+    parseKdf: function (descriptor) {
+        const match = /^pbkdf2-sha256:([1-9][0-9]{5,7})$/.exec(String(descriptor));
+        const iterations = match ? Number(match[1]) : 0;
+        if (iterations < this.KDF_MIN_ITERATIONS || iterations > this.KDF_MAX_ITERATIONS) {
+            throw new Error("The server sent an unsupported key derivation.");
+        }
+        return iterations;
+    },
+
+    // What the login pin remembers: key derivation and salt together
+    loginParams: function (kdf, salt) {
+        return `${kdf}|${salt}`;
+    },
+
+    // Pins written before the key derivation was stored hold the salt alone
+    sameLoginParams: function (pinned, params) {
+        return (pinned.includes("|") ? pinned : this.loginParams(this.KDF_DEFAULT, pinned)) === params;
+    },
+
     // Derive an AES-GCM Master Key from a Password and Salt using PBKDF2
     // extractable: only the login master key needs it (computeServerAuthHash reads its raw bytes)
-    deriveMasterKey: async function (password, saltBuffer, extractable = true) {
+    deriveMasterKey: async function (password, saltBuffer, extractable = true, iterations = 600000) {
         const encoder = new TextEncoder();
         const passKey = await window.crypto.subtle.importKey(
             "raw",
@@ -32,7 +59,7 @@ const CryptoUtils = {
             {
                 name: "PBKDF2",
                 salt: saltBuffer,
-                iterations: 600000, // Secure iteration count
+                iterations,
                 hash: "SHA-256"
             },
             passKey,

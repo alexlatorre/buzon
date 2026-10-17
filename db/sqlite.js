@@ -91,6 +91,10 @@ if (!userCols.find(c => c.name === 'mailbox_quota')) {
 if (!userCols.find(c => c.name === 'last_login')) {
     db.exec("ALTER TABLE users ADD COLUMN last_login DATETIME");
 }
+// Key derivation of the account's password (see public/crypto.js parseKdf)
+if (!userCols.find(c => c.name === 'kdf')) {
+    db.exec("ALTER TABLE users ADD COLUMN kdf TEXT NOT NULL DEFAULT 'pbkdf2-sha256:600000'");
+}
 // Indexes for the lookups done on every request (quota, inbox, shares, one-time links)
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_packages_user_status ON packages(user_id, status);
@@ -126,12 +130,12 @@ module.exports = {
     // Tables are created synchronously above
     ready: Promise.resolve(),
 
-    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash) => {
+    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000') => {
         const id = uuidv4();
         db.prepare(`
-            INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date().toISOString());
+            INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date().toISOString(), kdf);
         return id;
     },
 
@@ -153,6 +157,13 @@ module.exports = {
 
     updateServerAuthHash: async (userId, hash) => {
         db.prepare('UPDATE users SET server_auth_hash = ? WHERE id = ?').run(hash, userId);
+    },
+
+    // Password change: everything the password protects, in one statement, and only while the auth
+    // hash is still the one checked (false otherwise)
+    updateVault: async (userId, expectedAuthHash, salt, kdf, encryptedPrivateKey, iv, serverAuthHash) => {
+        return db.prepare('UPDATE users SET salt = ?, kdf = ?, encrypted_private_key = ?, iv = ?, server_auth_hash = ? WHERE id = ? AND server_auth_hash = ?')
+            .run(salt, kdf, encryptedPrivateKey, iv, serverAuthHash, userId, expectedAuthHash).changes > 0;
     },
 
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {

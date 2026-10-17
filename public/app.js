@@ -64,6 +64,24 @@ function loginStorage() {
     }
 }
 
+// Salt and key derivation of an account, checked before the password is used with them: well-formed,
+// and the same as on the last login from this browser (asks otherwise). A server that omits the key
+// derivation gets the default, which is never weaker than the minimum
+async function checkedLoginParams(username) {
+    const res = await fetch(`/api/auth/salt/${encodeURIComponent(username)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error('Invalid credentials'); // Mask user existence
+    const kdf = data.kdf === undefined ? CryptoUtils.KDF_DEFAULT : data.kdf;
+    const salt = CryptoUtils.checkLoginSalt(data.salt);
+    const iterations = CryptoUtils.parseKdf(kdf);
+    const params = CryptoUtils.loginParams(kdf, data.salt);
+    const pinned = await CryptoUtils.pinnedLogin(loginStorage(), username);
+    if (pinned && !CryptoUtils.sameLoginParams(pinned, params) && !confirm(LOGIN_PARAMS_CHANGED)) {
+        throw new Error('Login cancelled: the login parameters changed.');
+    }
+    return { salt, iterations, params, firstLogin: !pinned, saltBase64: data.salt, kdf };
+}
+
 const LOGIN_PARAMS_CHANGED = 'The server sent different login parameters for this account than on your last login in this browser.\n\n'
     + 'That is expected only if you changed your password on another device, or the account was deleted and created again. If not, cancel: '
     + 'the server may be trying to collect a hash of your password.\n\nContinue?';
@@ -77,10 +95,11 @@ async function handleRegister() {
     try {
         showMsg('Generating RSA-4096 key pair... (might take a few seconds)', 'info');
 
-        // 1. Generate Salt and derive Master Key
+        // 1. Generate Salt and derive Master Key (the key derivation is stored with the account)
+        const kdf = CryptoUtils.KDF_DEFAULT;
         const saltBase64 = CryptoUtils.generateSalt();
         const saltBuffer = CryptoUtils.base64ToBuffer(saltBase64);
-        const masterKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
+        const masterKey = await CryptoUtils.deriveMasterKey(password, saltBuffer, true, CryptoUtils.parseKdf(kdf));
 
         // 2. Compute Server Auth Hash
         const serverAuthHash = await CryptoUtils.computeServerAuthHash(masterKey);
@@ -102,6 +121,7 @@ async function handleRegister() {
             body: JSON.stringify({
                 username,
                 salt: saltBase64,
+                kdf,
                 publicKey: pubKeyBase64,
                 encryptedPrivateKey: encryptedPrivResult.ciphertext,
                 iv: encryptedPrivResult.iv,
@@ -111,7 +131,7 @@ async function handleRegister() {
 
         const data = await res.json();
         if (res.ok) {
-            await CryptoUtils.pinLogin(loginStorage(), username, saltBase64);
+            await CryptoUtils.pinLogin(loginStorage(), username, CryptoUtils.loginParams(kdf, saltBase64));
             showMsg('Vault created. You may now login.', 'success');
             document.getElementById('password').value = ''; // clear for safety
         } else {
@@ -161,24 +181,13 @@ async function handleLogin() {
     try {
         showMsg('Authenticating...', 'info');
 
-        // 1. Fetch user salt from server
-        const saltRes = await fetch(`/api/auth/salt/${encodeURIComponent(username)}`);
-        const saltData = await saltRes.json();
-
-        if (!saltRes.ok) throw new Error('Invalid credentials'); // Mask user existence
-
-        // Check the salt before the password is used with it: well-formed, and the one seen on the
-        // last login from this browser
-        const saltBuffer = CryptoUtils.checkLoginSalt(saltData.salt);
-        const pinned = await CryptoUtils.pinnedLogin(loginStorage(), username);
-        if (pinned && pinned !== saltData.salt && !confirm(LOGIN_PARAMS_CHANGED)) {
-            throw new Error('Login cancelled: the login parameters changed.');
-        }
+        // 1. Fetch the salt and key derivation, checked before the password is used with them
+        const params = await checkedLoginParams(username);
 
         // 2. Derive Master Key and Server Auth Hash. Without a pin there is nothing to compare the salt
         // with (new browser, cleared storage, or storage wiped by the server): say so
-        showMsg(pinned ? 'Deriving master key...' : 'Deriving master key... First login for this account in this browser.', 'info');
-        const masterKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
+        showMsg(params.firstLogin ? 'Deriving master key... First login for this account in this browser.' : 'Deriving master key...', 'info');
+        const masterKey = await CryptoUtils.deriveMasterKey(password, params.salt, true, params.iterations);
         const serverAuthHash = await CryptoUtils.computeServerAuthHash(masterKey);
 
         // 3. Authenticate with server using Server Auth Hash
@@ -203,13 +212,19 @@ async function handleLogin() {
         // 4. Decrypt Private Key
         showMsg('Decrypting private key in memory...', 'info');
         const { privateKey, publicKey, fingerprint } = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
-        // The key decrypted, so this salt is the account's real one: remember it for the next login
-        await CryptoUtils.pinLogin(loginStorage(), username, saltData.salt);
+        // The key decrypted, so these are the account's real parameters: remember them for the next login
+        await CryptoUtils.pinLogin(loginStorage(), username, params.params);
 
         // 4. Setup Global state and transition. The master key and the password are not kept:
         // only the private key (not exportable) and the session token are needed from here on
+        // Kept for a password change: the encrypted private key (ciphertext only) and the salt and key
+        // derivation checked above
         currentUser = {
             id: data.id,
+            username,
+            encryptedPrivateKey: data.encryptedPrivateKey,
+            privateKeyIv: data.iv,
+            vaultParams: { salt: params.salt, iterations: params.iterations },
             privateKey,
             publicKey,
             keyFingerprint: fingerprint,
@@ -292,6 +307,7 @@ function secureLogout() {
         document.getElementById('share-pw').value = '';
         document.getElementById('share-note').value = '';
         shareResultLink.value = '';
+        closePasswordModal();
         // Close the mobile drawer, or it greets the next person who logs in
         sidebar.classList.remove('sidebar-open');
         sidebarOverlay.classList.remove('active');
@@ -865,6 +881,97 @@ window.addEventListener('keydown', (e) => {
         escTimer = setTimeout(() => { escCount = 0; }, 500);
     }
 });
+
+// --- Change password ---
+// The same private key is re-encrypted under a key derived from the new password (new salt, current
+// key derivation); the key pair, packages and shares stay as they are. The server also wants the
+// current password's auth hash, so a stolen session token alone cannot change it.
+const passwordModal = document.getElementById('password-modal');
+const pwMsg = document.getElementById('pw-msg');
+const btnChangePassword = document.getElementById('btn-change-password');
+const MIN_ACCOUNT_PASSWORD_LENGTH = 8; // as in handleRegister
+
+function setPasswordMsg(text, type = 'info') {
+    pwMsg.textContent = text;
+    pwMsg.className = text ? `msg ${type}` : 'msg';
+}
+
+function closePasswordModal() {
+    for (const id of ['pw-current', 'pw-new', 'pw-confirm']) document.getElementById(id).value = '';
+    passwordModal.classList.add('hidden');
+}
+
+function openPasswordModal() {
+    closePasswordModal();
+    setPasswordMsg('');
+    btnChangePassword.disabled = false;
+    passwordModal.classList.remove('hidden');
+}
+
+async function handleChangePassword() {
+    const current = document.getElementById('pw-current').value;
+    const next = document.getElementById('pw-new').value;
+    const repeat = document.getElementById('pw-confirm').value;
+    if (!current) return setPasswordMsg('Enter your current password.', 'error');
+    if (next.length < MIN_ACCOUNT_PASSWORD_LENGTH) return setPasswordMsg(`The new password needs at least ${MIN_ACCOUNT_PASSWORD_LENGTH} characters.`, 'error');
+    if (next !== repeat) return setPasswordMsg('The new passwords do not match.', 'error');
+    if (next === current) return setPasswordMsg('The new password is the same as the current one.', 'error');
+
+    btnChangePassword.disabled = true;
+    // The account this change is for: a logout while it runs must not write into the next session
+    const user = currentUser;
+    let pkcs8Bytes = null;
+    try {
+        // 1. The current password must decrypt the stored private key to the key this session uses,
+        // with the salt and key derivation checked at login (nothing new is asked from the server)
+        setPasswordMsg('Checking the current password...', 'info');
+        const oldKey = await CryptoUtils.deriveMasterKey(current, user.vaultParams.salt, true, user.vaultParams.iterations);
+        const currentServerAuthHash = await CryptoUtils.computeServerAuthHash(oldKey);
+        try {
+            pkcs8Bytes = new Uint8Array(await CryptoUtils.decryptSymmetric(oldKey, user.encryptedPrivateKey, user.privateKeyIv));
+        } catch (e) {
+            throw new Error('The current password is wrong.');
+        }
+        if (await CryptoUtils.fingerprintFromPkcs8(new TextDecoder().decode(pkcs8Bytes)) !== user.keyFingerprint) {
+            throw new Error('The current password is wrong.');
+        }
+
+        // 2. Re-encrypt the same private key under the new password
+        setPasswordMsg('Re-encrypting your private key...', 'info');
+        const kdf = CryptoUtils.KDF_DEFAULT;
+        const salt = CryptoUtils.generateSalt();
+        const newKey = await CryptoUtils.deriveMasterKey(next, CryptoUtils.base64ToBuffer(salt), true, CryptoUtils.parseKdf(kdf));
+        const encrypted = await CryptoUtils.encryptSymmetric(newKey, pkcs8Bytes);
+        const serverAuthHash = await CryptoUtils.computeServerAuthHash(newKey);
+
+        const res = await authFetch('/api/auth/password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentServerAuthHash, salt, kdf, encryptedPrivateKey: encrypted.ciphertext, iv: encrypted.iv, serverAuthHash })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403) throw new Error('The current password is wrong.');
+        if (!res.ok) throw new Error(data.error || 'Could not change the password.');
+
+        await CryptoUtils.pinLogin(loginStorage(), user.username, CryptoUtils.loginParams(kdf, salt));
+        user.encryptedPrivateKey = encrypted.ciphertext;
+        user.privateKeyIv = encrypted.iv;
+        user.vaultParams = { salt: CryptoUtils.base64ToBuffer(salt), iterations: CryptoUtils.parseKdf(kdf) };
+        if (user !== currentUser) return; // logged out meanwhile: the change is done, nothing to show
+        for (const id of ['pw-current', 'pw-new', 'pw-confirm']) document.getElementById(id).value = '';
+        setPasswordMsg('Password changed. Use the new one from now on; your other sessions were logged out.', 'success');
+    } catch (error) {
+        console.error('Change password error:', error);
+        if (error.message !== 'Session expired') setPasswordMsg(error.message || 'Could not change the password.', 'error');
+    } finally {
+        if (pkcs8Bytes) pkcs8Bytes.fill(0);
+        btnChangePassword.disabled = false;
+    }
+}
+
+document.getElementById('btn-open-password').addEventListener('click', (e) => { e.preventDefault(); openPasswordModal(); });
+document.getElementById('btn-close-password').addEventListener('click', closePasswordModal);
+btnChangePassword.addEventListener('click', handleChangePassword);
 
 // Mobile Sidebar Toggle
 const btnMenu = document.getElementById('btn-menu');

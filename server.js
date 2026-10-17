@@ -460,14 +460,29 @@ app.get('/api/integrity', (req, res) => {
     res.json({ files: currentFileHashes() });
 });
 
-// Key material must have the shape public/app.js produces: 16-byte salt, RSA-OAEP public key
-// (2048-8192 bits, SPKI), AES-GCM encrypted PKCS8 key, 12-byte IV, SHA-256 auth hash
-function registrationFieldsError(body) {
+// Key derivation stored per account, as public/crypto.js parseKdf accepts it. New accounts and
+// password changes may only use the current default (KDF_DEFAULT in public/crypto.js, kept equal by a
+// test), so no account can stand out from the fake answers for unknown usernames. After raising both,
+// accounts still on the old one can be told apart until their next password change.
+const DEFAULT_KDF = 'pbkdf2-sha256:600000';
+
+// The password-protected part of an account: 16-byte salt, key derivation, AES-GCM encrypted PKCS8
+// key, 12-byte IV, SHA-256 auth hash
+function vaultFieldsError(body) {
     if (base64Bytes(body.salt) !== 16) return 'Invalid salt';
+    if (body.kdf !== undefined && body.kdf !== DEFAULT_KDF) return 'Invalid key derivation';
     if (base64Bytes(body.iv) !== 12) return 'Invalid IV';
     if (base64Bytes(body.serverAuthHash) !== 32) return 'Invalid auth hash';
     const privateKeyBytes = base64Bytes(body.encryptedPrivateKey);
     if (privateKeyBytes < 256 || privateKeyBytes > 16 * 1024) return 'Invalid encrypted private key';
+    return null;
+}
+
+// Key material must have the shape public/app.js produces: the vault fields plus an RSA-OAEP public
+// key (2048-8192 bits, SPKI)
+function registrationFieldsError(body) {
+    const vaultError = vaultFieldsError(body);
+    if (vaultError) return vaultError;
     const publicKeyBytes = base64Bytes(body.publicKey);
     if (publicKeyBytes < 0 || publicKeyBytes > 4096) return 'Invalid public key';
     try {
@@ -506,7 +521,7 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(409).json({ error: 'User already exists' });
         }
 
-        const id = await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv, hashAuthToken(serverAuthHash));
+        const id = await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv, hashAuthToken(serverAuthHash), req.body.kdf || DEFAULT_KDF);
         res.json({ success: true, userId: id });
     } catch (error) {
         console.error('Registration error:', error);
@@ -521,9 +536,9 @@ app.get('/api/auth/salt/:username', async (req, res) => {
         const user = await db.getUserByUsername(req.params.username);
         if (!user) {
             // Return a fake (but stable and well-formed) salt to prevent enumeration
-            return res.json({ salt: fakeSaltFor(req.params.username) });
+            return res.json({ salt: fakeSaltFor(req.params.username), kdf: DEFAULT_KDF });
         }
-        res.json({ salt: user.salt });
+        res.json({ salt: user.salt, kdf: user.kdf || DEFAULT_KDF });
     } catch (error) {
         console.error('Salt fetch error:', error);
         res.status(500).json({ error: 'Server error' });
@@ -580,6 +595,7 @@ app.post('/api/auth/login', async (req, res) => {
         res.json({
             id: user.id,
             salt: user.salt,
+            kdf: user.kdf || DEFAULT_KDF,
             encryptedPrivateKey: user.encrypted_private_key,
             iv: user.iv,
             sessionToken
@@ -587,6 +603,39 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Server error during login' });
+    }
+});
+
+// Change password: the browser re-encrypts the same private key under a key derived from the new
+// password. The current password's auth hash is required too, so a stolen session token is not
+// enough (and the auth rate limit applies to guesses). Wrong current password: 403, not 401, so the
+// page does not take it for an expired session. Every other session of the account ends.
+app.post('/api/auth/password', requireAuth, async (req, res) => {
+    try {
+        const body = req.body || {};
+        if (typeof body.currentServerAuthHash !== 'string' || body.kdf !== DEFAULT_KDF) {
+            return res.status(400).json({ error: 'Invalid request' });
+        }
+        const fieldError = vaultFieldsError(body);
+        if (fieldError) return res.status(400).json({ error: fieldError });
+
+        const user = await db.getUserById(req.session.userId);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.server_auth_hash === LEGACY_AUTH_MARKER || !verifyAuthHash(user.server_auth_hash, body.currentServerAuthHash)) {
+            return res.status(403).json({ error: 'Invalid credentials' });
+        }
+
+        // Only if nothing changed the vault since it was read: of two concurrent changes, one wins
+        const updated = await db.updateVault(user.id, user.server_auth_hash, body.salt, body.kdf, body.encryptedPrivateKey, body.iv, hashAuthToken(body.serverAuthHash));
+        if (!updated) return res.status(409).json({ error: 'The password was changed meanwhile' });
+        for (const [token, session] of sessions) {
+            if (session.userId === user.id && token !== req.sessionToken) sessions.delete(token);
+        }
+        console.log(`[Auth] Password changed for account ${user.id}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 

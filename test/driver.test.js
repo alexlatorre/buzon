@@ -42,3 +42,13 @@ test('the guards are in the SQL itself', () => {
     assert.match(src, /UPDATE one_time_links SET is_used = 1 WHERE token = \? AND is_used = 0/);
     assert.match(src, /download_count < max_downloads/);
 });
+
+test('updateVault only writes while the auth hash is the one checked', async () => {
+    const id = await db.createUser('vault', 'c2FsdA==', 'pub', 'priv', 'iv', 'sha256:old');
+    assert.equal(await db.updateVault(id, 'sha256:old', 's2', 'pbkdf2-sha256:600000', 'priv2', 'iv2', 'sha256:new'), true);
+    // A second change that read the vault before the first one wrote it
+    assert.equal(await db.updateVault(id, 'sha256:old', 's3', 'pbkdf2-sha256:600000', 'priv3', 'iv3', 'sha256:other'), false);
+    const user = await db.getUserById(id);
+    assert.equal(user.server_auth_hash, 'sha256:new');
+    assert.equal(user.salt, 's2');
+});

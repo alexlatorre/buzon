@@ -33,6 +33,7 @@ https://gallifrey.sytes.net/
 - Create an account with a **username** (3–32 letters, digits or `_`) and a **master password**.
 - The **strength meter** rates the password in real time.
 - **Important**: the master password is the only key to your data. If you lose it, nobody (not even the server admin) can recover your files.
+- **🔑 Change Password** in the sidebar changes it while you are logged in (you need the current one). Your keys, packages, shares and links stay the same.
 
 ### 2. Receiving files (Drop)
 - After login your **public link** is shown. Anyone with it can send you an encrypted package.
@@ -85,6 +86,8 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Quotas**: drops and shares share a 500 MB per-user quota.
 - **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
 - **Anti-enumeration on login**: unknown usernames get a deterministic, well-formed fake salt and the same error as a wrong password.
+- **Password change without new keys**: the browser re-encrypts the same private key under the new password (new salt, current key derivation), so packages, shares and drop links keep working. The server also requires the current password's auth hash, so a stolen session token is not enough, and every other session of the account ends. The key pair itself is not replaced: someone who knew the old password and kept a copy of the encrypted key can still decrypt with it, so after a leak, create a new account.
+- **Per-account key derivation**: stored with each account and returned with the salt; the browser refuses a derivation weaker than PBKDF2-SHA256 with 600 000 iterations, so a server cannot ask for a cheap hash, and the default can be raised without locking anyone out.
 - **Login salt checked by the browser**: it must be a well-formed 16-byte value, and it is remembered per username (under a hash of it, in `localStorage`) after each successful login or registration. If the server later sends a different one, the browser asks before using the password with it. This is trust on first use: on a new browser, or after the storage is cleared (which the server itself can do with a `Clear-Site-Data` header), there is nothing to compare with, and the login screen says "first login for this account in this browser".
 - **Packages sealed as a whole** (drop format 2): the server cannot swap file bodies, names or messages between slots or packages, drop or duplicate a file, or change the sender name without the inbox showing a warning; a package relabelled to the old format does not open.
 - **Recipient key fingerprint in drop links**: links end in `#k=<fingerprint>`, computed by the recipient's browser from its private key. The fragment never reaches the server, and the send page refuses to encrypt to a public key that does not match it. Older links without it still work, with a warning.
@@ -209,8 +212,9 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `POST` | `/api/auth/register` | – | Create an account (salt, public key, encrypted private key, auth hash). |
-| `GET` | `/api/auth/salt/:username` | – | PBKDF2 salt (fake but stable for unknown users). |
+| `GET` | `/api/auth/salt/:username` | – | Salt and key derivation (fake but stable for unknown users). |
 | `POST` | `/api/auth/login` | – | Log in with the auth hash; legacy accounts answer a challenge first. |
+| `POST` | `/api/auth/password` | ✔ | Change the password: the private key re-encrypted under the new one, plus the current password's auth hash. Ends the account's other sessions. |
 | `POST` | `/api/auth/logout` | ✔ | End the session. |
 | `GET` | `/api/user/:id/public-key` | – | Public key behind a drop link. |
 | `GET` | `/api/user/:id/quota` | – | Quota and usage behind a drop link. |
@@ -243,7 +247,7 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 - **Pending packages expire** after `PACKAGE_RETENTION_DAYS` (30 by default); set `0` before upgrading to keep the old behaviour.
 - **Restart after changing `public/`** is no longer required for the integrity check, but run `npm run hashes` after any frontend change: the pages carry Subresource Integrity hashes, and a stale one makes the browser refuse the file.
 - **Users will see "Changes detected"** in the integrity badge after each release that changes the frontend. Tell them to compare with the [trusted hashes](#-trusted-hashes-sha-256) before accepting.
-- **Crypto parameters are fixed** (PBKDF2 600 000 iterations, RSA-OAEP 4096, AES-GCM 256): there is no per-account record of them yet, so changing them would lock existing accounts out.
+- **Per-account key derivation**: accounts now store their key derivation (`users.kdf`, added on startup as `pbkdf2-sha256:600000` for existing accounts). To raise it, change `KDF_DEFAULT` in `public/crypto.js` and `DEFAULT_KDF` in `server.js` together (a test checks they match): it applies to new accounts and to each account's next password change, and existing accounts keep logging in (until they change their password, they can be told apart from unknown usernames). The browser refuses anything under 600 000 iterations.
 
 ---
 
@@ -272,16 +276,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `19b62afa48ed1fab6ce4ee99ae1379de613a0ac4f71ae4c49544ac998fa2f287` |
-| `crypto.js` | `ed3168b548ad159dbfc434409fdd22caf1a8740fa257ff5287c85fcb64775352` |
+| `app.js` | `4877eb72a7ce797b40c209e93ae31f1495cbbda0c7d4ac118f61b29088500884` |
+| `crypto.js` | `8c41dc332bc9b724a808265a58871137ded7f2e9ffd65ecfae84f8ad342e66b3` |
 | `integrity.js` | `1874d51cc1054644a2d1eb5eec3478c02ec3fb8db951230e7f4d6fed72560465` |
 | `share.js` | `162c4d9fc68d15af86b8d4f6066131c2d3e83d10d96f294518b9923bbba4cf39` |
 | `drop.js` | `0caee606e7046451a88f569b0be1d1bf95af631b3a7183356c69a78eacab5f3a` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `c50ac4e7ec81018a0588ac44c7afdd7e1de6883519bbb0825c12e77184374674` |
+| `index.html` | `8052cf80f77efc7a4ee516bcabf6a3e82800a15731c079674e9b9bbe5aa89c3f` |
 | `about.html` | `218c8d670db6d2792b84292c8d879c160d69028924d9336cb723b9f5eb538db1` |
-| `drop.html` | `96ce24778f3f417b645f4f4ba2cf1d8e44255ef5070fb89674935d4d07093c00` |
-| `share.html` | `ed84afd15f6284fd1b2072d34e9992f847eaea2582f4223ba6bb8dbde330da75` |
+| `drop.html` | `a767f178c6a1adf91d7d75462e04e8f236cca884203e84acea888175d7d343b6` |
+| `share.html` | `b08811e8e5c11fb32db06bb1ad1b735a42834639e70e12bfa4f34e39e6553012` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -307,6 +311,8 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 - **Cifrado de extremo a extremo**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iteraciones).
 - **El servidor no ve** contraseñas, claves, mensajes, contenido de ficheros ni (en los envíos) sus nombres.
 - **Paquetes sellados** (formato 2): el servidor no puede intercambiar ficheros, nombres o mensajes, quitar o duplicar un fichero ni cambiar el nombre del remitente sin que la bandeja lo avise.
+- **Cambio de contraseña sin cambiar las claves**: el navegador vuelve a cifrar la misma clave privada; el servidor pide además la contraseña actual y cierra las demás sesiones.
+- **Derivación de clave por cuenta**: el navegador rechaza cualquiera más débil que PBKDF2 con 600 000 iteraciones.
 - **Salt del login comprobado por el navegador**: debe tener 16 bytes y se recuerda por usuario; si el servidor manda otro distinto, el navegador pregunta antes de usar la contraseña.
 - **Hash de autenticación protegido**: la base de datos guarda un hash del token de login; si se filtra, no sirve para entrar.
 - **Migración de cuentas antiguas, cerrada por defecto**: no pueden entrar salvo con `LEGACY_MIGRATION=open`; entonces solo se actualizan si el navegador descifra un reto cifrado con la clave pública de la cuenta.

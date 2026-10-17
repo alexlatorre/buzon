@@ -44,6 +44,13 @@ test('the server answers right after start (tables exist), register and login wo
     aliceToken = login.data.sessionToken;
 });
 
+test('the key derivation is stored and a password change updates the account', { skip }, async () => {
+    assert.equal((await api.json('GET', '/api/auth/salt/alice')).data.kdf, 'pbkdf2-sha256:600000');
+    const random = n => Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(n))).toString('base64');
+    const body = { currentServerAuthHash: random(32), salt: random(16), kdf: 'pbkdf2-sha256:600000', encryptedPrivateKey: random(2000), iv: random(12), serverAuthHash: random(32) };
+    assert.equal((await api.json('POST', '/api/auth/password', body, aliceToken)).status, 403);
+});
+
 test('drops, inbox, download and quota', { skip }, async () => {
     const drop = await api.drop(alice.id, alice.publicKey, [{ name: 'a.txt', content: 'x'.repeat(2000) }]);
     assert.equal(drop.status, 200, JSON.stringify(drop.data));

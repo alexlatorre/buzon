@@ -119,5 +119,5 @@ test('registering in a browser remembers the new account\'s salt', async () => {
     await ui.page.handleRegister();
     assert.match(ui.el('auth-msg').textContent, /Vault created/);
     const salt = (await api.json('GET', '/api/auth/salt/dave')).data.salt;
-    assert.deepEqual([...storage.values()], [salt]);
+    assert.deepEqual([...storage.values()], [`pbkdf2-sha256:600000|${salt}`]);
 });

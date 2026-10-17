@@ -106,6 +106,7 @@ const ready = (async () => {
             public_link_enabled: 'ALTER TABLE users ADD COLUMN public_link_enabled BOOLEAN DEFAULT TRUE',
             mailbox_quota: 'ALTER TABLE users ADD COLUMN mailbox_quota BIGINT DEFAULT 524288000',
             last_login: 'ALTER TABLE users ADD COLUMN last_login DATETIME',
+            kdf: "ALTER TABLE users ADD COLUMN kdf VARCHAR(64) NOT NULL DEFAULT 'pbkdf2-sha256:600000'",
             server_auth_hash: "ALTER TABLE users ADD COLUMN server_auth_hash VARCHAR(255) NOT NULL DEFAULT 'LEGACY_MIGRATION_REQUIRED'"
         };
         for (const [col, sql] of Object.entries(userMigrations)) {
@@ -163,11 +164,11 @@ module.exports = {
     ready,
 
     // Structural placeholders - Implementation would map SQLite queries to MySQL syntax
-    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash) => {
+    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000') => {
         const id = uuidv4();
         await pool.execute(
-            'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date()]
+            'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date(), kdf]
         );
         return id;
     },
@@ -193,6 +194,16 @@ module.exports = {
 
     updateServerAuthHash: async (userId, hash) => {
         await pool.execute('UPDATE users SET server_auth_hash = ? WHERE id = ?', [hash, userId]);
+    },
+
+    // Password change: everything the password protects, in one statement, and only while the auth
+    // hash is still the one checked (false otherwise)
+    updateVault: async (userId, expectedAuthHash, salt, kdf, encryptedPrivateKey, iv, serverAuthHash) => {
+        const [result] = await pool.execute(
+            'UPDATE users SET salt = ?, kdf = ?, encrypted_private_key = ?, iv = ?, server_auth_hash = ? WHERE id = ? AND server_auth_hash = ?',
+            [salt, kdf, encryptedPrivateKey, iv, serverAuthHash, userId, expectedAuthHash]
+        );
+        return result.affectedRows > 0;
     },
 
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {

@@ -53,6 +53,7 @@
           <p class="nav-label">Main</p>
           <a href="#" id="nav-inbox" class="nav-item active">Inbox</a>
           <a href="#" id="btn-open-share" class="nav-item">📤 Share File</a>
+          <a href="#" id="btn-open-password" class="nav-item">🔑 Change Password</a>
         </div>
         <div class="nav-group drop-link-group">
           <p class="nav-label">Your Public Drop Link</p>
@@ -140,6 +141,34 @@
   </div>
 
   <!-- Share Modal -->
+  <div id="password-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🔑 Change Password</h3>
+        <button id="btn-close-password" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="pw-current">Current password</label>
+          <input type="password" id="pw-current" autocomplete="current-password">
+        </div>
+        <div class="form-group">
+          <label for="pw-new">New password</label>
+          <input type="password" id="pw-new" autocomplete="new-password" minlength="8">
+        </div>
+        <div class="form-group">
+          <label for="pw-confirm">Repeat the new password</label>
+          <input type="password" id="pw-confirm" autocomplete="new-password" minlength="8">
+        </div>
+        <p class="text-muted">Your keys, packages and shares stay the same: only the password that protects your private key changes. Your other sessions are logged out.</p>
+        <p id="pw-msg" class="msg"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-change-password" class="btn primary">Change Password</button>
+      </div>
+    </div>
+  </div>
+
   <div id="share-modal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
@@ -209,8 +238,8 @@
     </div>
   </div>
 
-  <script src="crypto.js" integrity="sha256-7TFotUitFZ2/xDRAn90iyvGodA+iV/9Sh8hfy2R3U1I="></script>
+  <script src="crypto.js" integrity="sha256-jEHcMyvJtySoCCZaWIcRN97X8un/1l7ProT4rTQuZrM="></script>
   <script src="integrity.js" integrity="sha256-GHTVHMEFRkSi0ete7DR4wC7D+425USMOf01v7XJWBGU="></script>
-  <script src="app.js" integrity="sha256-GbYq+kjtH6ts5O6ZrhN53mE6CsT3GuTElUSsmY+i8oc="></script>
+  <script src="app.js" integrity="sha256-SHfrcqfOeXtAwgnpOuMfFJXLvaDH1KwRj2GykIhQCIQ="></script>
 </body>
 </html>
