@@ -136,6 +136,8 @@
 
     // Decrypt and download
     async function handleDownload() {
+        // Enter while a download runs would start another one and use up another download
+        if (btnDownload.disabled) return;
         const password = passwordInput.value;
         if (!password) return showMsg('Enter the unlock password.', 'error');
         if (!shareMeta) return;

@@ -32,3 +32,9 @@ test('the note is shown in the success panel', () => {
     assert.match(js, /formEl\.classList\.add\('hidden'\);\s*successEl\.classList\.remove\('hidden'\);/);
     assert.match(js, /messageEl\.textContent = message;/);
 });
+
+test('Enter does not start a second download while one is running', () => {
+    const handler = js.slice(js.indexOf('async function handleDownload('));
+    const firstLines = handler.split('\n').slice(0, 4).join('\n');
+    assert.match(firstLines, /if \(btnDownload\.disabled\) return;/);
+});
