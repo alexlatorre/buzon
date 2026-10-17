@@ -183,5 +183,8 @@ btnSubmit.addEventListener('click', async () => {
     }
 });
 
+// The CSP blocks inline handlers, so the button is wired here
+document.getElementById('btn-send-another').addEventListener('click', () => window.location.reload());
+
 // Initialize
 fetchPublicKey();

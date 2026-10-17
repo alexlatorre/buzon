@@ -244,11 +244,11 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 | `crypto.js` | `af2f299ba7c7d0db4751b8be26c6c4421e5d24af8d66ba3b0e1d0cc75961f7b9` |
 | `integrity.js` | `3891adc44c05e55b436347f8d5a43a82992e7c1a14585ebef060bdc1ed4041fe` |
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
-| `drop.js` | `cc639892f1841c211ccf971f535e8e32292a6cbb0da817ab1fd42f016b52a187` |
+| `drop.js` | `b9c09fe71b9eaa68babaf3d41f6d084c0d61a408293ff970379c74867f6d9998` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
 | `index.html` | `b6d091e0ecac342cf640e89db5d57d6fe05d7e07bd6fffd0af48b1d4959aa8db` |
 | `about.html` | `5eea32319dfd255efd0eab6c8816c835e577adccbc0ed14a5e50599ebfc4b1e6` |
-| `drop.html` | `23e6cd33fce3d27d050f855b17880eae32f4e9dc67d32a5e951c93f800f7f7cd` |
+| `drop.html` | `f615b2f5e8fdd0233104147e9ebdd9842006f54ed122666e3b9163879e05663a` |
 | `share.html` | `327917ca6c4f8e137a34d95ec7f8ea65a838da3f049505aa048ced13f8636ef6` |
 <!-- hashes:end -->
 
