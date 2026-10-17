@@ -27,12 +27,12 @@ const dropDir = () => path.join(server.dataDir, 'drop');
 const filesOnDisk = () => fs.readdirSync(dropDir()).length;
 
 test('drop stores the package with encrypted file names', async () => {
-    const drop = await api.drop(alice.id, alice.publicKey, [{ name: 'secreto.txt', content: 'top secret' }], 'Bob <script>');
+    const drop = await api.drop(alice.id, alice.publicKey, [{ name: 'secreto.txt', content: 'top secret' }], '  <b>Bob</b>\u0007 ');
     assert.equal(drop.status, 200);
 
     const pkgs = await api.json('GET', `/api/packages/${alice.id}`, null, alice.token);
     const pkg = pkgs.data[0];
-    assert.equal(pkg.sender_name, 'Bob script');
+    assert.equal(pkg.sender_name, '<b>Bob</b>');
     const stored = pkg.files[0].original_name;
     assert.match(stored, /^enc:/);
     assert.ok(!stored.includes('secreto'));

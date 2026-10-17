@@ -230,14 +230,14 @@ The suite (`test/`, Node's built-in test runner, no extra dependencies) starts r
 
 ## 🔏 Trusted Hashes (SHA-256)
 
-The repository forces LF line endings (`.gitattributes`), so these hashes are the same on GitHub, in any checkout (Windows included) and in the Docker image. Compare them with what your instance serves; `npm test` fails if this table is out of date.
+The repository forces LF line endings (`.gitattributes`), so these hashes are the same on GitHub, in any checkout (Windows included) and in the Docker image. Compare them with what your instance serves; `npm test` fails if this table is out of date; regenerate it with `npm run hashes`.
 
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `d3f6bdc80df895d5138fa037c65f92082059c9cda07dda7735a68ec230ad992a` |
+| `app.js` | `99ea672c20c8d8da64b9c4c55fc8b6fdb4342eb16810c7cc37a893d910126194` |
 | `crypto.js` | `2540b202e93d02904ddcf150faf4c812e1736eee2f5c2a67d8d6520275cd01c1` |
-| `integrity.js` | `10c0ea69af9e30c0540daa8f5366be574e482f5edbf49b7ffb4d4ccdf90ca37b` |
+| `integrity.js` | `3891adc44c05e55b436347f8d5a43a82992e7c1a14585ebef060bdc1ed4041fe` |
 | `share.js` | `bd68cd9b5f5d865a21dfc6f4055c4484008c523889dcec73d151356e474f1f0a` |
 | `drop.js` | `31d6a9fd17d19be85b16899dd9df093776b70016fcb541bf8e0e95f260f5e21d` |
 | `style.css` | `7010497f5780066110fbddaa4604234adfc33fd64b635a28d560d7392471109b` |

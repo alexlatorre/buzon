@@ -10,6 +10,22 @@ let currentUser = {
 
 let currentPackages = [];
 let selectedPackage = null;
+
+// SQLite returns "YYYY-MM-DD HH:MM:SS" in UTC without a zone marker; read it as UTC, not local time
+function parseServerDate(value) {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
+        return new Date(value.replace(' ', 'T') + 'Z');
+    }
+    return new Date(value);
+}
+
+// Dates are always shown as yyyy/mm/dd HH:MM (24h, local time)
+function formatDateTime(date, withSeconds = false) {
+    const pad = n => String(n).padStart(2, '0');
+    const day = `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}`;
+    const time = `${pad(date.getHours())}:${pad(date.getMinutes())}` + (withSeconds ? `:${pad(date.getSeconds())}` : '');
+    return `${day} ${time}`;
+}
 let currentPackageSessionKey = null;
 
 // DOM Elements
@@ -258,9 +274,7 @@ function renderPackages() {
     }
 
     currentPackages.forEach(pkg => {
-        const date = new Date(pkg.created_at);
-        const formattedDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const formattedTime = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const formattedDate = formatDateTime(parseServerDate(pkg.created_at));
 
         const div = document.createElement('div');
         div.className = 'package-item';
@@ -273,7 +287,7 @@ function renderPackages() {
             <div class="package-info">
                 <div class="package-header">
                     <span class="package-sender"></span>
-                    <span class="package-date">${formattedDate} at ${formattedTime}</span>
+                    <span class="package-date">${formattedDate}</span>
                 </div>
                 <div class="package-subheader">
                     <span class="package-message-peek">Encrypted message (E2E)</span>
@@ -314,7 +328,7 @@ async function openPackage(id) {
 
         // 4. Fill Modal
         document.getElementById('modal-sender').textContent = pkg.sender_name || 'Anonymous';
-        document.getElementById('modal-date').textContent = new Date(pkg.created_at).toLocaleString();
+        document.getElementById('modal-date').textContent = formatDateTime(parseServerDate(pkg.created_at), true);
         document.getElementById('modal-message').textContent = message;
 
         const fileList = document.getElementById('modal-files');

@@ -493,9 +493,9 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
         let { senderName, encryptedSessionKey, encryptedMessage, messageIv } = req.body;
         const files = req.files || [];
 
-        // Sanitize senderName (the UI renders it as text, this just keeps it short and tidy)
+        // Keep the name as typed (the UI renders it as text); just cap length and drop control characters
         if (senderName) {
-            senderName = String(senderName).substring(0, 64).replace(/[<>]/g, '');
+            senderName = String(senderName).replace(/[\u0000-\u001f\u007f]/g, '').trim().substring(0, 64);
         }
 
         // Validate Quota again with the real sizes (Content-Length may be absent)

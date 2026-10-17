@@ -11,6 +11,12 @@ const IntegrityCheck = {
     detailsPanel: null,
     detailsVisible: false,
 
+    // Same yyyy/mm/dd HH:MM format as the inbox (app.js loads after this file)
+    formatDateTime(date) {
+        const pad = n => String(n).padStart(2, '0');
+        return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    },
+
     // Compute SHA-256 hash of a string using Web Crypto API
     async sha256(text) {
         const encoder = new TextEncoder();
@@ -143,7 +149,7 @@ const IntegrityCheck = {
 
         // Timestamp
         if (stored) {
-            html += `<div class="integrity-timestamp">Fingerprints recorded: ${new Date(stored.timestamp).toLocaleString()}</div>`;
+            html += `<div class="integrity-timestamp">Fingerprints recorded: ${this.formatDateTime(new Date(stored.timestamp))}</div>`;
         }
 
         // Accept button (only on warning)
