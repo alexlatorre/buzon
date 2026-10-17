@@ -258,6 +258,9 @@ function secureLogout() {
         document.getElementById('share-pw').value = '';
         document.getElementById('share-note').value = '';
         shareResultLink.value = '';
+        // Close the mobile drawer, or it greets the next person who logs in
+        sidebar.classList.remove('sidebar-open');
+        sidebarOverlay.classList.remove('active');
 
         // 3. Switch panels
         dashPanel.classList.remove('active');
@@ -832,6 +835,10 @@ function toggleSidebar() {
 }
 
 if (btnMenu) btnMenu.addEventListener('click', toggleSidebar);
+document.getElementById('nav-inbox').addEventListener('click', (e) => {
+    e.preventDefault();
+    if (sidebar.classList.contains('sidebar-open')) toggleSidebar();
+});
 if (sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
 
 // ========================

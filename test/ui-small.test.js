@@ -15,3 +15,11 @@ test('every clipboard write handles a refusal', () => {
         assert.match(statement, /\.catch\(/, `clipboard call #${i + 1} has no catch`);
     });
 });
+
+test('logout closes the mobile sidebar and Inbox closes it too', () => {
+    const logout = app.slice(app.indexOf('function secureLogout('), app.indexOf('function secureLogout(') + 3000);
+    assert.match(logout, /sidebar\.classList\.remove\('sidebar-open'\)/);
+    assert.match(logout, /sidebarOverlay\.classList\.remove\('active'\)/);
+    assert.match(html, /<a href="#" id="nav-inbox" class="nav-item active">Inbox<\/a>/);
+    assert.match(app, /getElementById\('nav-inbox'\)\.addEventListener\('click'/);
+});
