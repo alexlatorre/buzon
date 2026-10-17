@@ -85,6 +85,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Quotas**: drops and shares share a 500 MB per-user quota.
 - **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
 - **Anti-enumeration on login**: unknown usernames get a deterministic, well-formed fake salt and the same error as a wrong password.
+- **Login salt checked by the browser**: it must be a well-formed 16-byte value, and it is remembered per username (under a hash of it, in `localStorage`) after each successful login or registration. If the server later sends a different one, the browser asks before using the password with it. This is trust on first use: on a new browser, or after the storage is cleared (which the server itself can do with a `Clear-Site-Data` header), there is nothing to compare with, and the login screen says "first login for this account in this browser".
 - **Packages sealed as a whole** (drop format 2): the server cannot swap file bodies, names or messages between slots or packages, drop or duplicate a file, or change the sender name without the inbox showing a warning; a package relabelled to the old format does not open.
 - **Recipient key fingerprint in drop links**: links end in `#k=<fingerprint>`, computed by the recipient's browser from its private key. The fragment never reaches the server, and the send page refuses to encrypt to a public key that does not match it. Older links without it still work, with a warning.
 - **Subresource Integrity**: every script and stylesheet tag carries the SHA-256 of its file, so the browser refuses to run a modified file served under an unmodified page (`npm run hashes` keeps the attributes current).
@@ -269,16 +270,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `685d0c70417213162ae67c60137526b694e63aeb57932f4ca261c2f98bd05728` |
-| `crypto.js` | `257d73180a705acf3e8b3ea7abfe89cd3a897c22302e03bffb1d348122e14f8f` |
+| `app.js` | `ce479a860260ea34222ba8fb880f452ea7c1d08ca07d591c6747e9a394c937c7` |
+| `crypto.js` | `5086f18b1c90bc4776c4494bea5657023ffc64b4c8d9132dd9b95f0cbe51fc1a` |
 | `integrity.js` | `1874d51cc1054644a2d1eb5eec3478c02ec3fb8db951230e7f4d6fed72560465` |
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
 | `drop.js` | `0caee606e7046451a88f569b0be1d1bf95af631b3a7183356c69a78eacab5f3a` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `4ddf4bced77628b627edc0762dd3eaa5a93cf62ea845b3b4a530e8e01447bd01` |
+| `index.html` | `2974e1d2a08666e70bfcf1953b515dd961578ad05aa7fe011d2af262b56210b8` |
 | `about.html` | `aebd79f290af5d3b0bad2cb8745afc9d85e06fa326e8d20f9e5995ad171094b4` |
-| `drop.html` | `524efb49647a66e687c54edc4d76d2f4c16fb775a1975f8e5c84a73f55e8c3ce` |
-| `share.html` | `38761c77fe44766cc87e6e1de432e940597543f5fbd80fe94ae2c23cde9ebb60` |
+| `drop.html` | `53156360fa0450c9cee615606851030b020d5b6aed9314dc66efd5613bd5a694` |
+| `share.html` | `4127a415e893bbfb90012923dbf49ea0f838951cbb5c0dac89f0096d99c6b0c8` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -304,6 +305,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 - **Cifrado de extremo a extremo**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iteraciones).
 - **El servidor no ve** contraseñas, claves, mensajes, contenido de ficheros ni (en los envíos) sus nombres.
 - **Paquetes sellados** (formato 2): el servidor no puede intercambiar ficheros, nombres o mensajes, quitar o duplicar un fichero ni cambiar el nombre del remitente sin que la bandeja lo avise.
+- **Salt del login comprobado por el navegador**: debe tener 16 bytes y se recuerda por usuario; si el servidor manda otro distinto, el navegador pregunta antes de usar la contraseña.
 - **Hash de autenticación protegido**: la base de datos guarda un hash del token de login; si se filtra, no sirve para entrar.
 - **Migración de cuentas antiguas, cerrada por defecto**: no pueden entrar salvo con `LEGACY_MIGRATION=open`; entonces solo se actualizan si el navegador descifra un reto cifrado con la clave pública de la cuenta.
 - **Sesiones** con token `Bearer` de 24 h y comprobación de propietario en paquetes, ficheros, shares y enlaces.

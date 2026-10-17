@@ -55,6 +55,19 @@ function showMsg(msg, type = 'info') {
     authMsg.className = `msg ${type}`;
 }
 
+// localStorage can be missing or throw (private windows, blocked site data)
+function loginStorage() {
+    try {
+        return window.localStorage;
+    } catch (e) {
+        return null;
+    }
+}
+
+const LOGIN_PARAMS_CHANGED = 'The server sent different login parameters for this account than on your last login in this browser.\n\n'
+    + 'That is expected only if you changed your password on another device, or the account was deleted and created again. If not, cancel: '
+    + 'the server may be trying to collect a hash of your password.\n\nContinue?';
+
 async function handleRegister() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
@@ -98,6 +111,7 @@ async function handleRegister() {
 
         const data = await res.json();
         if (res.ok) {
+            await CryptoUtils.pinLogin(loginStorage(), username, saltBase64);
             showMsg('Vault created. You may now login.', 'success');
             document.getElementById('password').value = ''; // clear for safety
         } else {
@@ -152,9 +166,17 @@ async function handleLogin() {
 
         if (!saltRes.ok) throw new Error('Invalid credentials'); // Mask user existence
 
-        // 2. Derive Master Key and Server Auth Hash
-        showMsg('Deriving master key...', 'info');
-        const saltBuffer = CryptoUtils.base64ToBuffer(saltData.salt);
+        // Check the salt before the password is used with it: well-formed, and the one seen on the
+        // last login from this browser
+        const saltBuffer = CryptoUtils.checkLoginSalt(saltData.salt);
+        const pinned = await CryptoUtils.pinnedLogin(loginStorage(), username);
+        if (pinned && pinned !== saltData.salt && !confirm(LOGIN_PARAMS_CHANGED)) {
+            throw new Error('Login cancelled: the login parameters changed.');
+        }
+
+        // 2. Derive Master Key and Server Auth Hash. Without a pin there is nothing to compare the salt
+        // with (new browser, cleared storage, or storage wiped by the server): say so
+        showMsg(pinned ? 'Deriving master key...' : 'Deriving master key... First login for this account in this browser.', 'info');
         const masterKey = await CryptoUtils.deriveMasterKey(password, saltBuffer);
         const serverAuthHash = await CryptoUtils.computeServerAuthHash(masterKey);
 
@@ -180,6 +202,8 @@ async function handleLogin() {
         // 4. Decrypt Private Key
         showMsg('Decrypting private key in memory...', 'info');
         const { privateKey, fingerprint } = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
+        // The key decrypted, so this salt is the account's real one: remember it for the next login
+        await CryptoUtils.pinLogin(loginStorage(), username, saltData.salt);
 
         // 4. Setup Global state and transition. The master key and the password are not kept:
         // only the private key (not exportable) and the session token are needed from here on

@@ -171,6 +171,43 @@ const CryptoUtils = {
         );
     },
 
+    // Login salt from the server, checked before the password touches it: a malicious server could
+    // send a short or degenerate salt so that the auth hashes it collects become precomputable. A
+    // well-formed salt shared by every account cannot be told apart here: the pin below covers that
+    checkLoginSalt: function (salt) {
+        if (typeof salt !== "string" || !/^[A-Za-z0-9+/]{21}[AQgw]==$/.test(salt)) {
+            throw new Error("The server sent an invalid login salt.");
+        }
+        const bytes = new Uint8Array(this.base64ToBuffer(salt));
+        if (bytes.every(b => b === bytes[0])) throw new Error("The server sent an invalid login salt.");
+        return bytes.buffer;
+    },
+
+    // Login parameters last used for a username in this browser (trust on first use). A change means
+    // the password was changed elsewhere, or the server is substituting them. Stored under a hash of
+    // the username (lower-cased: MySQL matches usernames without case); storage may be missing or
+    // blocked, and the server itself can wipe it (Clear-Site-Data), so a missing pin is not proof
+    loginPinKey: async function (username) {
+        const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode("shadowdrop/login-pin/v1|" + username.toLowerCase()));
+        return "shadowdrop.login." + Array.from(new Uint8Array(digest).slice(0, 16), b => b.toString(16).padStart(2, "0")).join("");
+    },
+
+    pinnedLogin: async function (storage, username) {
+        try {
+            return storage.getItem(await this.loginPinKey(username));
+        } catch (e) {
+            return null;
+        }
+    },
+
+    pinLogin: async function (storage, username, value) {
+        try {
+            storage.setItem(await this.loginPinKey(username), value);
+        } catch (e) {
+            // No storage: the next login from this browser is trusted on first use again
+        }
+    },
+
     // Compute Server Authentication Hash from Master Key
     computeServerAuthHash: async function (masterKey) {
         const rawKey = await window.crypto.subtle.exportKey("raw", masterKey);

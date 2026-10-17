@@ -53,13 +53,13 @@ function loadAppPage({ fetch, confirm = () => true, storage = new Map(), hidden 
     const URL_ = { createObjectURL: blob => { saved.push(blob); return `blob:${saved.length}`; }, revokeObjectURL() {} };
     const alerts = [];
     const code = `${read('crypto.js')}\n${read('app.js')}\nreturn {
-        openPackage, downloadFile, handleLogin,
+        openPackage, downloadFile, handleLogin, handleRegister,
         get user() { return currentUser; }, set user(v) { currentUser = v; },
         set packages(v) { currentPackages = v; }
     };`;
     const page = new Function('window', 'document', 'fetch', 'localStorage', 'confirm', 'alert', 'URL', 'navigator', code)(
         window, document, fetch, localStorage, confirm, msg => alerts.push(msg), URL_, { clipboard: { writeText: async () => {} } });
-    return { page, el: document.getElementById, saved, alerts, storage };
+    return { page, window, el: document.getElementById, saved, alerts, storage };
 }
 
 module.exports = { loadAppPage };
