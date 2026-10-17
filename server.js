@@ -78,8 +78,11 @@ function fakeSaltFor(username) {
 // Both strings must match public/crypto.js.
 const MIGRATION_CHALLENGE_LABEL = Buffer.from('shadowdrop/migration-challenge/v1');
 const MIGRATION_RESPONSE_PREFIX = Buffer.from('shadowdrop/migration-response/v1');
-const migrationChallenges = new Map(); // userId -> { expectedResponse, expiresAt }
+// Keyed by a random id per attempt, so one login attempt can only consume its own challenge and a
+// stranger asking for challenges cannot invalidate the owner's
+const migrationChallenges = new Map(); // challengeId -> { userId, expectedResponse, expiresAt }
 const CHALLENGE_TTL = 5 * 60 * 1000;
+const MAX_PENDING_CHALLENGES = 20; // per user; the oldest is dropped beyond this
 
 function createMigrationChallenge(user) {
     const nonce = crypto.randomBytes(32);
@@ -89,8 +92,12 @@ function createMigrationChallenge(user) {
         nonce
     );
     const expectedResponse = crypto.createHash('sha256').update(MIGRATION_RESPONSE_PREFIX).update(nonce).digest('base64');
-    migrationChallenges.set(user.id, { expectedResponse, expiresAt: Date.now() + CHALLENGE_TTL });
-    return encrypted.toString('base64');
+
+    const pending = [...migrationChallenges].filter(([, c]) => c.userId === user.id);
+    if (pending.length >= MAX_PENDING_CHALLENGES) migrationChallenges.delete(pending[0][0]);
+    const challengeId = crypto.randomUUID();
+    migrationChallenges.set(challengeId, { userId: user.id, expectedResponse, expiresAt: Date.now() + CHALLENGE_TTL });
+    return { challengeId, challenge: encrypted.toString('base64') };
 }
 
 // Cleanup expired sessions and challenges every hour
@@ -99,8 +106,8 @@ setInterval(() => {
     for (const [token, session] of sessions) {
         if (now - session.createdAt > SESSION_TTL) sessions.delete(token);
     }
-    for (const [userId, challenge] of migrationChallenges) {
-        if (challenge.expiresAt < now) migrationChallenges.delete(userId);
+    for (const [challengeId, challenge] of migrationChallenges) {
+        if (challenge.expiresAt < now) migrationChallenges.delete(challengeId);
     }
 }, 60 * 60 * 1000);
 
@@ -421,7 +428,7 @@ app.get('/api/auth/salt/:username', async (req, res) => {
 // Step 2: Login with Server Auth Hash
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { username, serverAuthHash, challengeResponse } = req.body;
+        const { username, serverAuthHash, challengeId, challengeResponse } = req.body;
         if (typeof username !== 'string' || typeof serverAuthHash !== 'string' || !username || !serverAuthHash) {
             return res.status(400).json({ error: 'Missing credentials' });
         }
@@ -433,16 +440,16 @@ app.post('/api/auth/login', async (req, res) => {
 
         if (user.server_auth_hash === LEGACY_AUTH_MARKER) {
             // Legacy account: only accept the new hash from whoever can decrypt with the account's private key
-            const pending = migrationChallenges.get(user.id);
-            if (typeof challengeResponse !== 'string' || !pending || pending.expiresAt < Date.now()) {
+            const pending = typeof challengeId === 'string' ? migrationChallenges.get(challengeId) : undefined;
+            if (typeof challengeResponse !== 'string' || !pending || pending.userId !== user.id || pending.expiresAt < Date.now()) {
                 return res.json({
                     migrationRequired: true,
-                    challenge: createMigrationChallenge(user),
+                    ...createMigrationChallenge(user),
                     encryptedPrivateKey: user.encrypted_private_key,
                     iv: user.iv
                 });
             }
-            migrationChallenges.delete(user.id);
+            migrationChallenges.delete(challengeId);
             if (!safeEqual(pending.expectedResponse, challengeResponse)) {
                 return res.status(401).json({ error: 'Invalid credentials' });
             }

@@ -168,7 +168,7 @@ async function handleLogin() {
             } catch (e) {
                 throw new Error('Could not verify the legacy account upgrade.');
             }
-            data = await postLogin({ username, serverAuthHash, challengeResponse });
+            data = await postLogin({ username, serverAuthHash, challengeId: data.challengeId, challengeResponse });
             // Expired challenge or server restart between the two steps: ask the user to try again
             if (!data.sessionToken) throw new Error('Could not verify the legacy account upgrade. Please try again.');
         }

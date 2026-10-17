@@ -62,7 +62,7 @@ test('legacy account cannot be claimed without the private key', async () => {
     assert.equal(first.data.sessionToken, undefined);
 
     const forged = await api.json('POST', '/api/auth/login', {
-        username: 'legacy', serverAuthHash: 'attacker', challengeResponse: b64(new Uint8Array(32))
+        username: 'legacy', serverAuthHash: 'attacker', challengeId: first.data.challengeId, challengeResponse: b64(new Uint8Array(32))
     });
     assert.equal(forged.status, 401);
     assert.equal(storedAuthHash(user.id), 'LEGACY_MIGRATION_REQUIRED');
@@ -71,7 +71,7 @@ test('legacy account cannot be claimed without the private key', async () => {
 test('the server challenge is labelled and only a hash of the nonce is accepted', async () => {
     const { user } = await api.register('legacyraw', 'raw nonce pass');
     db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id = ?").run(user.id);
-    const challenge = (await api.json('POST', '/api/auth/login', { username: 'legacyraw', serverAuthHash: 'x' })).data.challenge;
+    const { challenge, challengeId } = (await api.json('POST', '/api/auth/login', { username: 'legacyraw', serverAuthHash: 'x' })).data;
     const ciphertext = Buffer.from(challenge, 'base64');
 
     // Without the label the challenge does not decrypt: it lives in its own domain
@@ -80,7 +80,7 @@ test('the server challenge is labelled and only a hash of the nonce is accepted'
     // Echoing the decrypted nonce (the old protocol) is rejected
     const label = new TextEncoder().encode('shadowdrop/migration-challenge/v1');
     const nonce = await globalThis.crypto.subtle.decrypt({ name: 'RSA-OAEP', label }, user.privateKey, ciphertext);
-    const raw = await api.json('POST', '/api/auth/login', { username: 'legacyraw', serverAuthHash: 'x', challengeResponse: b64(nonce) });
+    const raw = await api.json('POST', '/api/auth/login', { username: 'legacyraw', serverAuthHash: 'x', challengeId, challengeResponse: b64(nonce) });
     assert.equal(raw.status, 401);
     assert.equal(storedAuthHash(user.id), 'LEGACY_MIGRATION_REQUIRED');
 });
@@ -101,17 +101,49 @@ test('a correct challenge answer works only once', async () => {
     const { user } = await api.register('legacyonce', 'once pass');
     const setLegacy = () => db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id = ?").run(user.id);
     setLegacy();
-    const { challenge } = (await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: 'x' })).data;
+    const { challenge, challengeId } = (await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: 'x' })).data;
     const challengeResponse = await CryptoUtils.answerMigrationChallenge(user.privateKey, challenge);
-    const first = await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: user.serverAuthHash, challengeResponse });
+    const first = await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: user.serverAuthHash, challengeId, challengeResponse });
     assert.equal(first.status, 200);
     assert.ok(first.data.sessionToken);
 
     // Replaying the same answer later must not be accepted again, even if the account is legacy again
     setLegacy();
-    const replay = await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: 'attacker', challengeResponse });
+    const replay = await api.json('POST', '/api/auth/login', { username: 'legacyonce', serverAuthHash: 'attacker', challengeId, challengeResponse });
     assert.equal(replay.data.sessionToken, undefined);
     assert.equal(storedAuthHash(user.id), 'LEGACY_MIGRATION_REQUIRED');
+});
+
+test('a stranger asking for challenges cannot block the owner from migrating', async () => {
+    const { user } = await api.register('legacyrace', 'race pass');
+    db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id = ?").run(user.id);
+    const step1 = () => api.json('POST', '/api/auth/login', { username: 'legacyrace', serverAuthHash: 'x' });
+
+    const owner = (await step1()).data;
+    const stranger = (await step1()).data;
+    // The stranger burns their own challenge with a wrong answer
+    const wrong = await api.json('POST', '/api/auth/login', {
+        username: 'legacyrace', serverAuthHash: 'x', challengeId: stranger.challengeId, challengeResponse: b64(new Uint8Array(32))
+    });
+    assert.equal(wrong.status, 401);
+
+    const challengeResponse = await CryptoUtils.answerMigrationChallenge(user.privateKey, owner.challenge);
+    const res = await api.json('POST', '/api/auth/login', {
+        username: 'legacyrace', serverAuthHash: user.serverAuthHash, challengeId: owner.challengeId, challengeResponse
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.data.sessionToken);
+});
+
+test("a challenge issued for one account cannot be answered for another", async () => {
+    const { user: a } = await api.register('legacya', 'a pass');
+    const { user: b } = await api.register('legacyb', 'b pass');
+    db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id IN (?, ?)").run(a.id, b.id);
+    const forA = (await api.json('POST', '/api/auth/login', { username: 'legacya', serverAuthHash: 'x' })).data;
+    const challengeResponse = await CryptoUtils.answerMigrationChallenge(a.privateKey, forA.challenge);
+    const res = await api.json('POST', '/api/auth/login', { username: 'legacyb', serverAuthHash: 'x', challengeId: forA.challengeId, challengeResponse });
+    assert.equal(res.data.sessionToken, undefined);
+    assert.equal(storedAuthHash(b.id), 'LEGACY_MIGRATION_REQUIRED');
 });
 
 test('legacy account owner migrates by answering the challenge', async () => {

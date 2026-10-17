@@ -118,7 +118,7 @@ function client(base) {
             const pkcs8 = new TextDecoder().decode(await aesDecrypt(masterKey, res.data.encryptedPrivateKey, res.data.iv));
             const privateKey = await subtle.importKey('pkcs8', unb64(pkcs8), { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt']);
             const challengeResponse = await CryptoUtils.answerMigrationChallenge(privateKey, res.data.challenge);
-            res = await json('POST', '/api/auth/login', { username, serverAuthHash, challengeResponse });
+            res = await json('POST', '/api/auth/login', { username, serverAuthHash, challengeId: res.data.challengeId, challengeResponse });
         }
         return res;
     }
