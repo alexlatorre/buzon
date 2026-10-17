@@ -415,7 +415,9 @@ async function destroyPackage() {
 async function updateQuotaDisplay() {
     if (!currentUser) return;
     try {
-        const res = await fetch(`/api/user/${currentUser.id}/quota`);
+        const res = await fetch(`/api/user/${currentUser.id}/config`, {
+            headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        });
         const data = await res.json();
         if (res.ok) {
             const usageMB = (data.usage / (1024 * 1024)).toFixed(1);
@@ -585,7 +587,7 @@ togglePublicLink.addEventListener('change', async () => {
     if (!currentUser) return;
     try {
         const enabled = togglePublicLink.checked;
-        await fetch(`/api/user/${currentUser.id}/config`, {
+        const res = await fetch(`/api/user/${currentUser.id}/config`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -593,10 +595,12 @@ togglePublicLink.addEventListener('change', async () => {
             },
             body: JSON.stringify({ publicLinkEnabled: enabled })
         });
-        updateQuotaDisplay(); // Refresh UI bits
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (e) {
         console.error('Failed to toggle public link', e);
+        alert('Could not change the public link. Please try again.');
     }
+    updateQuotaDisplay(); // Show the state the server actually has
 });
 
 btnGenOTL.addEventListener('click', async () => {

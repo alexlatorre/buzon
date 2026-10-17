@@ -114,12 +114,59 @@ test('drops over the remaining quota are refused before upload', async () => {
 });
 
 test('disabled public link refuses drops', async () => {
-    await api.json('POST', `/api/user/${alice.id}/config`, { public_link_enabled: false }, alice.token);
+    await api.json('POST', `/api/user/${alice.id}/config`, { publicLinkEnabled: false }, alice.token);
     try {
         assert.equal((await api.drop(alice.id, alice.publicKey, [{ name: 'a', content: 'x' }])).status, 404);
     } finally {
-        await api.json('POST', `/api/user/${alice.id}/config`, { public_link_enabled: true }, alice.token);
+        await api.json('POST', `/api/user/${alice.id}/config`, { publicLinkEnabled: true }, alice.token);
     }
+});
+
+test('the public link switch turns the link off and on again', async () => {
+    // Same body the dashboard sends (app.js togglePublicLink)
+    const setLink = enabled => api.json('POST', `/api/user/${alice.id}/config`, { publicLinkEnabled: enabled }, alice.token);
+    const ownerView = () => api.json('GET', `/api/user/${alice.id}/config`, null, alice.token);
+    try {
+        assert.equal((await setLink(false)).status, 200);
+        assert.equal((await ownerView()).data.publicLinkEnabled, false);
+        assert.equal((await api.json('GET', `/api/user/${alice.id}/public-key`)).status, 404);
+
+        assert.equal((await setLink(true)).status, 200);
+        assert.equal((await ownerView()).data.publicLinkEnabled, true);
+        assert.equal((await api.json('GET', `/api/user/${alice.id}/public-key`)).status, 200);
+    } finally {
+        await setLink(true);
+    }
+});
+
+test('the switch rejects anything that is not a boolean', async () => {
+    for (const body of [{}, { public_link_enabled: true }, { publicLinkEnabled: 'false' }, { publicLinkEnabled: 0 }]) {
+        assert.equal((await api.json('POST', `/api/user/${alice.id}/config`, body, alice.token)).status, 400, JSON.stringify(body));
+    }
+    assert.equal((await api.json('GET', `/api/user/${alice.id}/config`, null, alice.token)).data.publicLinkEnabled, true);
+});
+
+test('the owner sees quota and link state even with the public link off', async () => {
+    await api.json('POST', `/api/user/${alice.id}/config`, { publicLinkEnabled: false }, alice.token);
+    try {
+        const res = await api.json('GET', `/api/user/${alice.id}/config`, null, alice.token);
+        assert.equal(res.status, 200);
+        assert.equal(typeof res.data.usage, 'number');
+        assert.equal(res.data.quota, 524288000);
+        assert.equal(res.data.publicLinkEnabled, false);
+        assert.equal((await api.json('GET', `/api/user/${alice.id}/config`)).status, 401);
+        assert.equal((await api.json('GET', `/api/user/${alice.id}/config`, null, bob.token)).status, 403);
+    } finally {
+        await api.json('POST', `/api/user/${alice.id}/config`, { publicLinkEnabled: true }, alice.token);
+    }
+});
+
+test('the dashboard sends the key the server reads and reads its own config', () => {
+    const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+    assert.match(app, /JSON\.stringify\(\{ publicLinkEnabled: enabled \}\)/);
+    const quota = app.slice(app.indexOf('async function updateQuotaDisplay('), app.indexOf('async function downloadFile('));
+    assert.match(quota, /fetch\(`\/api\/user\/\$\{currentUser\.id\}\/config`/);
+    assert.match(quota, /Authorization/);
 });
 
 test('a one-time link works exactly once, even under concurrency', async () => {

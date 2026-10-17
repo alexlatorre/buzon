@@ -443,13 +443,37 @@ app.get('/api/user/:uuid/quota', async (req, res) => {
 });
 
 // 3.2 Link Management API (protected)
+// Owner's view of quota and link state; unlike /quota it keeps working when the public link is off
+app.get('/api/user/:uuid/config', requireAuth, async (req, res) => {
+    try {
+        if (req.session.userId !== req.params.uuid) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+        const user = await db.getUserById(req.session.userId);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        const usage = await getStorageUsage(user.id);
+        res.json({
+            quota: Number(user.mailbox_quota),
+            usage,
+            remaining: Math.max(0, user.mailbox_quota - usage),
+            publicLinkEnabled: Number(user.public_link_enabled) === 1
+        });
+    } catch (err) {
+        console.error('Config read error:', err);
+        res.status(500).json({ error: 'Failed to read config' });
+    }
+});
+
 app.post('/api/user/:uuid/config', requireAuth, async (req, res) => {
     try {
         if (req.session.userId !== req.params.uuid) {
             return res.status(403).json({ error: 'Forbidden' });
         }
-        const { public_link_enabled } = req.body;
-        await db.togglePublicLink(req.params.uuid, public_link_enabled);
+        const enabled = req.body && req.body.publicLinkEnabled;
+        if (typeof enabled !== 'boolean') {
+            return res.status(400).json({ error: 'publicLinkEnabled must be true or false' });
+        }
+        await db.togglePublicLink(req.params.uuid, enabled);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to update config' });
