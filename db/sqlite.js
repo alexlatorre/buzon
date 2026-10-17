@@ -10,6 +10,8 @@ const dbPath = path.join(dataDir, 'buzon.db');
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
+// Explicit, rather than relying on how better-sqlite3 was compiled
+db.pragma('foreign_keys = ON');
 // Overwrite deleted content instead of leaving it in free pages of the file
 db.pragma('secure_delete = ON');
 
@@ -77,7 +79,6 @@ db.exec(`
 `);
 
 // Dynamic migrations
-const migrate = (cmd) => { try { db.exec(cmd); } catch (e) { } };
 
 // Mailbox Quota & Link Management Migrations
 const userCols = db.prepare("PRAGMA table_info(users)").all();

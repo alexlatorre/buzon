@@ -146,3 +146,11 @@ test('changing a public file without a restart updates the served hash', async (
         await copy.stop();
     }
 });
+
+test('file deletions never swallow errors silently', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    assert.equal((server.match(/fs\.unlinkSync\(/g) || []).length, 1, 'only removeFile may call unlinkSync');
+    assert.doesNotMatch(server, /catch \{ \}/);
+});

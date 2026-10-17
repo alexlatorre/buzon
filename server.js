@@ -341,9 +341,19 @@ const upload = multer({
     limits: { fileSize: 50 * 1024 * 1024, files: MAX_DROP_FILES, fields: 10, fieldSize: MAX_FIELD_SIZE } // 50MB max per file
 });
 
+// Deletes a stored file. "Already gone" is fine; anything else is logged so a file left behind (e.g.
+// locked on a Windows/SMB volume) is visible instead of silently orphaned
+function removeFile(filePath) {
+    try {
+        fs.unlinkSync(filePath);
+    } catch (error) {
+        if (error.code !== 'ENOENT') console.error(`Could not delete ${filePath}: ${error.message}`);
+    }
+}
+
 function removeUploadedFiles(req) {
     const files = req.files || (req.file ? [req.file] : []);
-    files.forEach(f => { try { fs.unlinkSync(f.path); } catch { } });
+    files.forEach(f => removeFile(f.path));
 }
 
 // Quota is check-then-insert. With MySQL every query yields to the event loop, so concurrent uploads
@@ -739,7 +749,7 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
                     storedPaths.push(newPath);
                 }
             } catch (error) {
-                storedPaths.forEach(p => { try { fs.unlinkSync(p); } catch { } });
+                storedPaths.forEach(removeFile);
                 await db.deletePackage(packageId).catch(() => {});
                 throw error;
             }
@@ -812,7 +822,7 @@ app.delete('/api/package/:packageId', requireAuth, async (req, res) => {
         // File paths come from the stored row, never from the request
         pkg.files.forEach(f => {
             const filePath = path.join(DROP_DIR, `${pkg.id}_${f.id}`);
-            try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
+            removeFile(filePath);
         });
 
         await db.deletePackage(pkg.id);
@@ -1045,7 +1055,7 @@ app.delete('/api/share/:token', requireAuth, async (req, res) => {
         }
         // The file path comes from the stored token, never from the request
         const filePath = path.join(SHARE_DIR, `${share.token}.enc`);
-        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
+        removeFile(filePath);
         await db.deleteShare(share.token);
         res.json({ success: true });
     } catch (error) {
@@ -1063,7 +1073,7 @@ async function purgeDeadShares() {
             const expired = s.expires_at && new Date(s.expires_at) < now;
             const exhausted = s.max_downloads > 0 && s.download_count >= s.max_downloads;
             if (!expired && !exhausted) continue;
-            try { fs.unlinkSync(path.join(SHARE_DIR, `${s.token}.enc`)); } catch { }
+            removeFile(path.join(SHARE_DIR, `${s.token}.enc`));
             await db.deleteShare(s.token);
         }
     } catch (error) {
@@ -1090,7 +1100,7 @@ async function sweepOrphanFiles() {
     try {
         const cutoff = Date.now() - ORPHAN_GRACE_MS;
         const isOld = file => { try { return fs.statSync(file).mtimeMs < cutoff; } catch { return false; } };
-        const remove = file => { try { fs.unlinkSync(file); } catch (error) { console.error('Orphan cleanup failed:', file, error.message); } };
+        const remove = removeFile;
 
         const liveDropFiles = new Set(await db.getAllPackageFileKeys());
         for (const name of fs.readdirSync(DROP_DIR)) {
@@ -1132,7 +1142,7 @@ async function purgeExpiredPackages() {
             if (storedDate(pkg.created_at) >= cutoff) continue;
             const full = await db.getPackageById(pkg.id);
             for (const f of (full && full.files) || []) {
-                try { fs.unlinkSync(path.join(DROP_DIR, `${pkg.id}_${f.id}`)); } catch { }
+                removeFile(path.join(DROP_DIR, `${pkg.id}_${f.id}`));
             }
             await db.deletePackage(pkg.id);
         }
