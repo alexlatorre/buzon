@@ -258,6 +258,16 @@ async function findDropRecipient(idOrToken) {
 
 // Runs before multer so nothing touches the disk for invalid links or full mailboxes
 const MULTIPART_OVERHEAD = 1024 * 1024;
+
+// Uploads must declare their size up front: without Content-Length (chunked) the quota pre-check
+// cannot run and multer would write up to its per-file limits before the request is rejected.
+// Node stops reading at the declared length, so the declared size bounds what reaches the disk.
+function declaredUploadSize(req) {
+    if (req.headers['transfer-encoding'] !== undefined) return null;
+    const value = req.headers['content-length'];
+    return /^\d+$/.test(value || '') ? Number(value) : null;
+}
+
 async function resolveDropTarget(req, res, next) {
     try {
         if (!isValidUUID(req.params.id)) {
@@ -267,8 +277,11 @@ async function resolveDropTarget(req, res, next) {
         if (!target) {
             return res.status(404).json({ error: 'Recipient or valid link not found' });
         }
+        const declaredSize = declaredUploadSize(req);
+        if (declaredSize === null) {
+            return res.status(411).json({ error: 'Content-Length required' });
+        }
         const remaining = target.user.mailbox_quota - await getStorageUsage(target.user.id);
-        const declaredSize = parseInt(req.headers['content-length'], 10) || 0;
         if (remaining <= 0 || declaredSize > remaining + MULTIPART_OVERHEAD) {
             return res.status(413).json({ error: 'Mailbox quota exceeded' });
         }
@@ -655,7 +668,30 @@ const shareStorage = multer.diskStorage({
 const shareUpload = multer({ storage: shareStorage, limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 20 } }); // 100MB max
 
 // 8. Create Share (Upload encrypted file)
-app.post('/api/share/:userId', requireAuth, shareUpload.single('file'), async (req, res) => {
+// Runs before multer: ownership, declared size and quota, so nothing is written for a refused share
+async function resolveShareTarget(req, res, next) {
+    try {
+        if (req.session.userId !== req.params.userId) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+        const declaredSize = declaredUploadSize(req);
+        if (declaredSize === null) {
+            return res.status(411).json({ error: 'Content-Length required' });
+        }
+        const user = await db.getUserById(req.session.userId);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        const remaining = user.mailbox_quota - await getStorageUsage(user.id);
+        if (remaining <= 0 || declaredSize > remaining + MULTIPART_OVERHEAD) {
+            return res.status(413).json({ error: 'Storage quota exceeded' });
+        }
+        next();
+    } catch (error) {
+        console.error('Share target error:', error);
+        res.status(500).json({ error: 'Server error creating share' });
+    }
+}
+
+app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.single('file'), async (req, res) => {
     try {
         const { userId } = req.params;
         if (req.session.userId !== userId) {
