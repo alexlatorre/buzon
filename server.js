@@ -322,12 +322,22 @@ function dropFieldsError(body, files) {
 }
 
 // Wrapped AES-256 key (32 + 16 tag), 12-byte IVs, 16-byte PBKDF2 salt, values the dashboard offers
+// Format 2 (format=2): name sealed with the file key ("enc2:"), no type, file key wrapped for the owner
 function shareFieldsError(body) {
+    if (body.format !== undefined && body.format !== '2') return 'Unknown share format';
     if (base64Bytes(body.encryptedFileKey) !== 48) return 'Invalid file key';
     if (base64Bytes(body.keyIv) !== 12 || base64Bytes(body.fileIv) !== 12) return 'Invalid IV';
     if (base64Bytes(body.salt) !== 16) return 'Invalid salt';
-    if (typeof body.originalName !== 'string' || !body.originalName || body.originalName.length > 255) return 'Invalid file name';
-    if (!optionalString(body.mimeType, 255)) return 'Invalid file type';
+    if (body.format === '2') {
+        if (typeof body.originalName !== 'string' || body.originalName.length > 2048
+            || !body.originalName.startsWith('enc2:') || !ENC_NAME_REGEX.test(body.originalName)) return 'Invalid file name';
+        if (body.mimeType !== undefined) return 'Invalid file type';
+        if (![256, 384, 512].includes(base64Bytes(body.ownerKey))) return 'Invalid owner key';
+    } else {
+        if (typeof body.originalName !== 'string' || !body.originalName || body.originalName.length > 255) return 'Invalid file name';
+        if (!optionalString(body.mimeType, 255)) return 'Invalid file type';
+        if (body.ownerKey !== undefined) return 'Invalid owner key';
+    }
     if (body.encryptedMessage !== undefined) {
         const messageBytes = base64Bytes(body.encryptedMessage);
         if (messageBytes < 16 || messageBytes > MAX_MESSAGE_BYTES + 16) return 'Invalid message';
@@ -893,7 +903,8 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
             removeUploadedFiles(req);
             return res.status(400).json({ error: fieldError });
         }
-        const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv, downloadProof } = req.body;
+        const { encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, encryptedMessage, messageIv, downloadProof, ownerKey } = req.body;
+        const format = req.body.format === '2' ? 2 : 1;
         const maxDownloads = intField(req.body.maxDownloads, 0, 1000);
         const expiresIn = intField(req.body.expiresIn, 0, 8760);
 
@@ -919,9 +930,9 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
             // Row first, then the file: a failed insert leaves only the temp file, which is removed below
             await db.createShare(
                 userId, token, encryptedFileKey, keyIv, salt, fileIv,
-                originalName, mimeType || 'application/octet-stream', req.file.size,
+                originalName, (format === 1 && mimeType) || 'application/octet-stream', req.file.size,
                 encryptedMessage || null, messageIv || null,
-                maxDownloads, expiresAt, downloadProof || null
+                maxDownloads, expiresAt, downloadProof || null, format, ownerKey || null
             );
             try {
                 fs.renameSync(req.file.path, path.join(SHARE_DIR, `${token}.enc`));
@@ -960,9 +971,13 @@ app.get('/api/share/:token/meta', async (req, res) => {
             return res.status(410).json({ error: 'Download limit reached' });
         }
 
+        // Only what the page needs before and after the password: no creation date or download
+        // history, and for format 2 no readable name or type at all
+        const format = Number(share.format) === 2 ? 2 : 1;
         res.json({
+            format,
             originalName: share.original_name,
-            mimeType: share.mime_type,
+            ...(format === 1 ? { mimeType: share.mime_type } : {}),
             size: share.size,
             salt: share.salt,
             keyIv: share.key_iv,
@@ -970,10 +985,8 @@ app.get('/api/share/:token/meta', async (req, res) => {
             fileIv: share.file_iv,
             encryptedMessage: share.encrypted_message,
             messageIv: share.message_iv,
-            maxDownloads: share.max_downloads,
-            downloadCount: share.download_count,
-            expiresAt: share.expires_at,
-            createdAt: share.created_at
+            downloadsLeft: share.max_downloads > 0 ? share.max_downloads - share.download_count : null,
+            expiresAt: share.expires_at
         });
     } catch (error) {
         console.error('Share meta error:', error);

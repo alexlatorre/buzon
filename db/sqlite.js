@@ -109,6 +109,13 @@ const shareCols = db.prepare("PRAGMA table_info(shares)").all();
 if (!shareCols.find(c => c.name === 'download_proof')) {
     db.exec("ALTER TABLE shares ADD COLUMN download_proof TEXT");
 }
+// Share format: 1 = name and type in clear, 2 = name sealed with the file key, file key wrapped for the owner
+if (!shareCols.find(c => c.name === 'format')) {
+    db.exec("ALTER TABLE shares ADD COLUMN format INTEGER DEFAULT 1");
+}
+if (!shareCols.find(c => c.name === 'owner_key')) {
+    db.exec("ALTER TABLE shares ADD COLUMN owner_key TEXT");
+}
 if (!userCols.find(c => c.name === 'server_auth_hash')) {
     // For existing users, we cannot magically compute the hash because we don't know their masterKey.
     // They will be locked out unless they re-register or we reset their accounts.
@@ -226,11 +233,11 @@ module.exports = {
     },
 
     // --- Shares ---
-    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt, downloadProof) => {
+    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt, downloadProof, format = 1, ownerKey = null) => {
         db.prepare(`
-            INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at, download_proof)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null, downloadProof || null);
+            INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at, download_proof, format, owner_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0, expiresAt || null, downloadProof || null, format, ownerKey);
         return token;
     },
 
@@ -280,7 +287,7 @@ module.exports = {
     },
 
     getSharesByUserId: async (userId) => {
-        return db.prepare('SELECT token, original_name, mime_type, size, max_downloads, download_count, expires_at, created_at FROM shares WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+        return db.prepare('SELECT token, original_name, mime_type, size, max_downloads, download_count, expires_at, created_at, format, owner_key FROM shares WHERE user_id = ? ORDER BY created_at DESC').all(userId);
     },
 
     deleteShare: async (token) => {

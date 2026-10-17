@@ -104,14 +104,14 @@
 
             shareMeta = data;
 
-            // Show file info
-            filenameEl.textContent = data.originalName;
+            // Show file info (format 2: the name is sealed until the password is entered)
+            filenameEl.textContent = Number(data.format) === 2 ? 'Encrypted file (name shown after unlocking)' : data.originalName;
             filesizeEl.textContent = formatSize(data.size);
 
             // Show limits info
             let limitsHtml = '';
-            if (data.maxDownloads > 0) {
-                const remaining = data.maxDownloads - data.downloadCount;
+            if (data.downloadsLeft !== null && data.downloadsLeft !== undefined) {
+                const remaining = data.downloadsLeft;
                 limitsHtml += `<span class="share-limit-item">📥 ${remaining} download${remaining !== 1 ? 's' : ''} remaining</span>`;
             }
             if (data.expiresAt) {
@@ -201,12 +201,17 @@
                 }
             }
 
-            // 7. Trigger download
-            const blob = new Blob([decryptedBuffer], { type: shareMeta.mimeType || 'application/octet-stream' });
+            // 7. Trigger download. Format 2: name sealed with a key derived from the file key. Always a
+            // neutral type and a cleaned name, so the browser never renders the file itself (a server
+            // relabelling a share as format 1 gets no more than that)
+            const v2 = Number(shareMeta.format) === 2;
+            const fileName = v2 ? await CryptoUtils.openShareName(fileKeyRaw, shareMeta.originalName) : CryptoUtils.cleanFileName(String(shareMeta.originalName || 'file'));
+            if (v2) filenameEl.textContent = fileName;
+            const blob = new Blob([decryptedBuffer], { type: 'application/octet-stream' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = shareMeta.originalName;
+            a.download = fileName;
             document.body.appendChild(a);
             a.click();
             a.remove();

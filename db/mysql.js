@@ -124,6 +124,13 @@ const ready = (async () => {
         if (!shareColRows.some(c => c.COLUMN_NAME === 'download_proof')) {
             await conn.query('ALTER TABLE shares ADD COLUMN download_proof VARCHAR(64)');
         }
+        // Share format: 1 = name and type in clear, 2 = name sealed, file key wrapped for the owner
+        if (!shareColRows.some(c => c.COLUMN_NAME === 'format')) {
+            await conn.query('ALTER TABLE shares ADD COLUMN format INT DEFAULT 1');
+        }
+        if (!shareColRows.some(c => c.COLUMN_NAME === 'owner_key')) {
+            await conn.query('ALTER TABLE shares ADD COLUMN owner_key TEXT');
+        }
         // Indexes for the lookups done on every request (MySQL has no CREATE INDEX IF NOT EXISTS)
         const [indexRows] = await conn.query(
             "SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE()"
@@ -276,12 +283,12 @@ module.exports = {
     },
 
     // --- Shares ---
-    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt, downloadProof) => {
+    createShare: async (userId, token, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage, messageIv, maxDownloads, expiresAt, downloadProof, format = 1, ownerKey = null) => {
         await pool.execute(
-            `INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at, download_proof)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO shares (token, user_id, encrypted_file_key, key_iv, salt, file_iv, original_name, mime_type, size, encrypted_message, message_iv, max_downloads, expires_at, download_proof, format, owner_key)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [token, userId, encryptedFileKey, keyIv, salt, fileIv, originalName, mimeType, size, encryptedMessage || null, messageIv || null, maxDownloads || 0,
-             expiresAt ? new Date(expiresAt) : null, downloadProof || null]
+             expiresAt ? new Date(expiresAt) : null, downloadProof || null, format, ownerKey]
         );
         return token;
     },
@@ -340,7 +347,7 @@ module.exports = {
 
     getSharesByUserId: async (userId) => {
         const [rows] = await pool.execute(
-            'SELECT token, original_name, mime_type, size, max_downloads, download_count, expires_at, created_at FROM shares WHERE user_id = ? ORDER BY created_at DESC',
+            'SELECT token, original_name, mime_type, size, max_downloads, download_count, expires_at, created_at, format, owner_key FROM shares WHERE user_id = ? ORDER BY created_at DESC',
             [userId]
         );
         return rows;

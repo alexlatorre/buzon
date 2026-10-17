@@ -659,7 +659,7 @@
           <strong>Result:</strong> Even if the server were compromised, the attacker could not read your messages or files. Your master password is the only key, and it <strong>never leaves your browser</strong>.
         </p>
         <p class="conclusion">
-          <strong>What the server does see:</strong> who receives packages and when, how many files they have and their encrypted size, the sender name the sender typed (not verified), your username and last login, and for shared files the file name, type and size.
+          <strong>What the server does see:</strong> who receives packages and when, how many files they have and their encrypted size, the sender name the sender typed (not verified), your username and last login, and for shared files their size, limits and expiry (the name is sealed until the password is entered; shares created before that change also show their name and type).
         </p>
       </div>
     </section>
@@ -683,7 +683,7 @@
           <div class="feature-icon">📤</div>
           <div class="feature-text">
             <h4>Secure File Sharing</h4>
-            <p>Drag & drop a file, set an unlock password, and share a link. The file is encrypted with AES-256-GCM and the key wrapped with PBKDF2 (600K iterations). Recipients decrypt and download entirely in their browser — the server never sees the content or the password (it does see the file name and size).</p>
+            <p>Drag & drop a file, set an unlock password, and share a link. The file is encrypted with AES-256-GCM and the key wrapped with PBKDF2 (600K iterations). Recipients decrypt and download entirely in their browser — the server never sees the content, the password or (for new shares) the file name; it does see the size.</p>
           </div>
         </li>
         <li>

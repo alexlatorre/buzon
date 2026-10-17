@@ -77,6 +77,20 @@ test('a share with an expiry is stored and expires at the right time', { skip },
     assert.equal((await api.json('GET', `/api/share/${created.data.token}/meta`)).status, 410);
 });
 
+test('format 2 shares keep their sealed name and owner key', { skip }, async () => {
+    const sealed = 'enc2:' + Buffer.alloc(12).toString('base64') + ':' + Buffer.alloc(272).toString('base64');
+    const ownerKey = Buffer.alloc(256, 1).toString('base64');
+    const created = await api.share(alice.id, aliceToken, { fields: { format: '2', originalName: sealed, mimeType: undefined, ownerKey } });
+    assert.equal(created.status, 200, JSON.stringify(created.data));
+    const listed = (await api.json('GET', `/api/shares/${alice.id}`, null, aliceToken)).data.find(s => s.token === created.data.token);
+    assert.equal(Number(listed.format), 2);
+    assert.equal(listed.original_name, sealed);
+    assert.equal(listed.owner_key, ownerKey);
+    const meta = (await api.json('GET', `/api/share/${created.data.token}/meta`)).data;
+    assert.equal(meta.format, 2);
+    assert.equal('mimeType' in meta, false);
+});
+
 test('one-time links work once', { skip }, async () => {
     const token = (await api.json('POST', `/api/user/${alice.id}/one-time-link`, null, aliceToken)).data.token;
     await api.json('POST', `/api/user/${alice.id}/config`, { publicLinkEnabled: false }, aliceToken);

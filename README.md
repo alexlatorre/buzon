@@ -65,7 +65,7 @@ Everything runs in the browser with the Web Crypto API (`window.crypto.subtle`).
 | **Login** | The browser derives the master key again and sends only `serverAuthHash = SHA-256(masterKey ‖ "SERVER_AUTH")`. The server stores `SHA-256(serverAuthHash)`, compares in constant time and returns the encrypted private key, which is decrypted in memory. |
 | **Send (drop)** | The sender's browser fetches your public key, creates a random AES-256-GCM session key, encrypts the message, **each file and each file name** with it, and wraps the session key with RSA-OAEP under its own label. Each ciphertext is bound to its role with associated data: the message seals the sender name and a list of random file ids, each name carries its file's id, and each file body (sent as raw bytes, IV ‖ ciphertext) can only be decrypted under that id. |
 | **Receive** | Your private key unwraps the session key, which decrypts message, names and files. The inbox compares the files and sender name the server lists with the sealed ones and warns about any difference. |
-| **Share** | A random AES-256-GCM key encrypts the file; that key is wrapped with `PBKDF2(share password, random salt, 600 000)`. |
+| **Share** | A random AES-256-GCM key encrypts the file; a name key derived from it (HKDF) seals the file name. The file key is wrapped with `PBKDF2(share password, random salt, 600 000)`; only the name key is also wrapped with the owner's own RSA public key (its own OAEP label), so the dashboard lists shares by name while an account takeover does not expose their contents. The link page shows neither name nor type before the password, and saves the file with a neutral type. |
 
 The server never sees passwords, master keys, private keys, session keys, messages, file contents or (for drops) file names.
 
@@ -100,8 +100,9 @@ Be clear about what Shadow Drop protects against:
 
 - **A malicious or compromised server can serve modified JavaScript** that steals your password. The integrity check makes this visible (it alerts when files change between visits and lets you compare with the [trusted hashes](#-trusted-hashes-sha-256)), but it cannot prevent it: whoever controls the server also controls `integrity.js`.
 - **The drop link fingerprint protects against a tampered API or database, not against a server that controls its own HTTP responses**: such a server can redirect the send page to a link carrying its own `#k`, which is the same power as serving modified pages. The send page shows the fingerprint in use, so a sender can compare it with the one the recipient gave them.
-- **Metadata is visible to the server**: who receives packages, when, how many files and their encrypted sizes, the sender name the sender typed, and for shares the file name and type (shown to the recipient before they enter the password).
+- **Metadata is visible to the server**: who receives packages, when, how many files and their encrypted sizes, the sender name the sender typed, and for shares their size, limits and expiry. Share names are sealed with the file key (shares created before that change keep their name and type in clear).
 - **Offline guessing**: the salt and encrypted private key of a user, and the salt and wrapped key of a share, are available to an attacker who gets the database (or, for shares, the link). PBKDF2 with 600 000 iterations slows guessing down; a strong password is still the real protection.
+- **The server can move a share's sealed name to another of the same owner's shares**, so the dashboard or the link page could show one share's name for another: nothing binds the name to the token, which the server chooses. It cannot read or invent a name.
 - **A stored package can be served again**: nothing ties a package to a date or a position in the inbox, so the server can show a copy of a real package twice, or with another date. It cannot change what is inside.
 - **Registration reveals whether a username exists** (it must, to avoid duplicates). Login does not.
 - **Sessions are kept in memory**: restarting the server logs everyone out.
@@ -236,6 +237,7 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 - **Configuration**: `config.js` no longer holds credentials; move them to the environment variables above.
 - **Docker**: the image now runs as uid 1000; fix volume and key permissions as described in [Docker](#-docker).
 - **Drops**: names and types are no longer stored in clear. Files stored before that change still carry them inside their JSON on disk; they disappear as those packages are destroyed or expire (30 days by default).
+- **Share format 2**: new shares are stored with `format = 2` and an `owner_key` (columns added on startup); their name is sealed and no type is stored. `GET /api/share/:token/meta` no longer returns `createdAt`, `downloadCount` or `maxDownloads` (it returns `downloadsLeft`), nor `mimeType` for format 2. Shares created before keep working.
 - **Shares**: new shares need a download proof derived from the password, so link holders cannot use up downloads; shares created before keep working without it. Share passwords now need 12 characters.
 - **Drop format 2**: new drops are stored with `format = 2` (a column added on startup). Packages sent before still open; their names and files use the previous format. File bodies are now raw bytes, 28 bytes larger than the file. The 256 KB message limit now also covers the sealed file list and sender name. Do not roll back to a version before format 2 while it receives drops: an older server accepts them but stores them as format 1, and they will not open.
 - **Pending packages expire** after `PACKAGE_RETENTION_DAYS` (30 by default); set `0` before upgrading to keep the old behaviour.
@@ -270,16 +272,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `ce479a860260ea34222ba8fb880f452ea7c1d08ca07d591c6747e9a394c937c7` |
-| `crypto.js` | `5086f18b1c90bc4776c4494bea5657023ffc64b4c8d9132dd9b95f0cbe51fc1a` |
+| `app.js` | `19b62afa48ed1fab6ce4ee99ae1379de613a0ac4f71ae4c49544ac998fa2f287` |
+| `crypto.js` | `ed3168b548ad159dbfc434409fdd22caf1a8740fa257ff5287c85fcb64775352` |
 | `integrity.js` | `1874d51cc1054644a2d1eb5eec3478c02ec3fb8db951230e7f4d6fed72560465` |
-| `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
+| `share.js` | `162c4d9fc68d15af86b8d4f6066131c2d3e83d10d96f294518b9923bbba4cf39` |
 | `drop.js` | `0caee606e7046451a88f569b0be1d1bf95af631b3a7183356c69a78eacab5f3a` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `2974e1d2a08666e70bfcf1953b515dd961578ad05aa7fe011d2af262b56210b8` |
-| `about.html` | `aebd79f290af5d3b0bad2cb8745afc9d85e06fa326e8d20f9e5995ad171094b4` |
-| `drop.html` | `53156360fa0450c9cee615606851030b020d5b6aed9314dc66efd5613bd5a694` |
-| `share.html` | `4127a415e893bbfb90012923dbf49ea0f838951cbb5c0dac89f0096d99c6b0c8` |
+| `index.html` | `c50ac4e7ec81018a0588ac44c7afdd7e1de6883519bbb0825c12e77184374674` |
+| `about.html` | `218c8d670db6d2792b84292c8d879c160d69028924d9336cb723b9f5eb538db1` |
+| `drop.html` | `96ce24778f3f417b645f4f4ba2cf1d8e44255ef5070fb89674935d4d07093c00` |
+| `share.html` | `ed84afd15f6284fd1b2072d34e9992f847eaea2582f4223ba6bb8dbde330da75` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -319,7 +321,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 
 ## Límites conocidos
 - Un servidor comprometido puede servir JavaScript modificado. La verificación de integridad lo hace visible, pero no lo puede impedir.
-- El servidor ve metadatos: cuándo recibes paquetes, cuántos ficheros y su tamaño cifrado, el nombre de remitente que escribe quien envía y, en los shares, el nombre del fichero.
+- El servidor ve metadatos: cuándo recibes paquetes, cuántos ficheros y su tamaño cifrado, el nombre de remitente que escribe quien envía y, en los shares, su tamaño (el nombre va sellado; solo los shares anteriores a ese cambio lo tienen en claro).
 - Quien obtenga la base de datos (o el enlace de un share) puede intentar adivinar contraseñas sin conexión; PBKDF2 lo frena, pero la defensa real es una contraseña fuerte.
 - El registro revela si un usuario existe; el login no.
 - Las sesiones viven en memoria: al reiniciar el servidor hay que volver a entrar.

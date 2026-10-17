@@ -231,15 +231,20 @@ const CryptoUtils = {
         return this.bufferToBase64(digest).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "").slice(0, 22);
     },
 
-    // The recipient computes it from their private key, which the server cannot forge: the public
-    // half (n, e) is read from the private key and re-encoded as SPKI
-    fingerprintFromPkcs8: async function (base64Pkcs8) {
+    // The public half (n, e) of a private key: the user's own public key, read from the private key so
+    // the server cannot substitute it
+    publicKeyFromPkcs8: async function (base64Pkcs8) {
         const subtle = window.crypto.subtle;
         const params = { name: "RSA-OAEP", hash: "SHA-256" };
         const privateKey = await subtle.importKey("pkcs8", this.base64ToBuffer(base64Pkcs8), params, true, ["decrypt"]);
         const { n, e } = await subtle.exportKey("jwk", privateKey);
-        const publicKey = await subtle.importKey("jwk", { kty: "RSA", n, e, alg: "RSA-OAEP-256", ext: true }, params, true, ["encrypt"]);
-        return this.publicKeyFingerprint(this.bufferToBase64(await subtle.exportKey("spki", publicKey)));
+        return subtle.importKey("jwk", { kty: "RSA", n, e, alg: "RSA-OAEP-256", ext: true }, params, true, ["encrypt"]);
+    },
+
+    // The recipient computes it from their private key, which the server cannot forge
+    fingerprintFromPkcs8: async function (base64Pkcs8) {
+        const publicKey = await this.publicKeyFromPkcs8(base64Pkcs8);
+        return this.publicKeyFingerprint(this.bufferToBase64(await window.crypto.subtle.exportKey("spki", publicKey)));
     },
 
     verifyRecipientKey: async function (spkiBase64, expectedFingerprint) {
@@ -483,5 +488,68 @@ const CryptoUtils = {
         combined.set(prefix, 0);
         combined.set(nonce, prefix.byteLength);
         return this.bufferToBase64(await window.crypto.subtle.digest("SHA-256", combined));
+    },
+
+    // --- Shares, format 2 ---
+    // The file name is sealed with a name key derived from the share's file key (HKDF), so neither the
+    // server nor whoever holds the link learns it before the password. The owner keeps only that name
+    // key, wrapped with their own public key (under its own OAEP label), to list their shares by name:
+    // someone who takes over the account learns the names, not the contents.
+    SHARE_V2: {
+        NAME: "shadowdrop/share/v2/name",
+        NAME_KEY_INFO: "shadowdrop/share/v2/name-key",
+        OWNER_KEY_LABEL: "shadowdrop/share/v2/owner-name-key"
+    },
+
+    // Raw bytes of the name key derived from the raw file key
+    shareNameKeyBytes: async function (rawFileKey) {
+        const base = await window.crypto.subtle.importKey("raw", rawFileKey, "HKDF", false, ["deriveBits"]);
+        return window.crypto.subtle.deriveBits(
+            { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: new TextEncoder().encode(this.SHARE_V2.NAME_KEY_INFO) }, base, 256);
+    },
+
+    importShareNameKey: function (rawNameKey, usages) {
+        return window.crypto.subtle.importKey("raw", rawNameKey, { name: "AES-GCM" }, false, usages);
+    },
+
+    sealShareName: async function (rawFileKey, name) {
+        const nameKey = await this.importShareNameKey(await this.shareNameKeyBytes(rawFileKey), ["encrypt"]);
+        const sealed = await this.aesGcmEncrypt(nameKey,
+            this.padTo256(new TextEncoder().encode(JSON.stringify({ name }))), this.SHARE_V2.NAME);
+        return `enc2:${this.bufferToBase64(sealed.iv)}:${this.bufferToBase64(sealed.ciphertext)}`;
+    },
+
+    // The sealed name, or "encrypted-file" when it does not open with this name key
+    openSealedShareName: async function (nameKey, sealed) {
+        const match = /^enc2:([A-Za-z0-9+/]+=*):([A-Za-z0-9+/]+=*)$/.exec(String(sealed || ""));
+        try {
+            const plain = await this.aesGcmDecrypt(nameKey, this.base64ToBuffer(match[1]),
+                this.base64ToBuffer(match[2]), this.SHARE_V2.NAME);
+            return this.cleanFileName(String(JSON.parse(new TextDecoder().decode(plain).replace(/\0+$/, "")).name));
+        } catch (e) {
+            return "encrypted-file";
+        }
+    },
+
+    // Link side, after the password: the name from the raw file key
+    openShareName: async function (rawFileKey, sealed) {
+        return this.openSealedShareName(await this.importShareNameKey(await this.shareNameKeyBytes(rawFileKey), ["decrypt"]), sealed);
+    },
+
+    wrapShareNameKeyForOwner: async function (ownerPublicKey, rawFileKey) {
+        const wrapped = await window.crypto.subtle.encrypt(
+            { name: "RSA-OAEP", label: new TextEncoder().encode(this.SHARE_V2.OWNER_KEY_LABEL) }, ownerPublicKey, await this.shareNameKeyBytes(rawFileKey));
+        return this.bufferToBase64(wrapped);
+    },
+
+    // Owner side: the name of one of their format 2 shares
+    ownerShareName: async function (privateKey, wrappedNameKey, sealed) {
+        try {
+            const raw = await window.crypto.subtle.decrypt(
+                { name: "RSA-OAEP", label: new TextEncoder().encode(this.SHARE_V2.OWNER_KEY_LABEL) }, privateKey, this.base64ToBuffer(wrappedNameKey));
+            return this.openSealedShareName(await this.importShareNameKey(raw, ["decrypt"]), sealed);
+        } catch (e) {
+            return "encrypted-file";
+        }
     }
 };

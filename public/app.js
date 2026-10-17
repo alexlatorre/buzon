@@ -136,6 +136,7 @@ async function decryptPrivateKey(masterKey, encryptedPrivateKey, iv) {
     const pkcs8 = new TextDecoder().decode(privKeyBuffer);
     return {
         privateKey: await CryptoUtils.importPrivateKey(pkcs8),
+        publicKey: await CryptoUtils.publicKeyFromPkcs8(pkcs8),
         fingerprint: await CryptoUtils.fingerprintFromPkcs8(pkcs8)
     };
 }
@@ -201,7 +202,7 @@ async function handleLogin() {
 
         // 4. Decrypt Private Key
         showMsg('Decrypting private key in memory...', 'info');
-        const { privateKey, fingerprint } = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
+        const { privateKey, publicKey, fingerprint } = await decryptPrivateKey(masterKey, data.encryptedPrivateKey, data.iv);
         // The key decrypted, so this salt is the account's real one: remember it for the next login
         await CryptoUtils.pinLogin(loginStorage(), username, saltData.salt);
 
@@ -210,6 +211,7 @@ async function handleLogin() {
         currentUser = {
             id: data.id,
             privateKey,
+            publicKey,
             keyFingerprint: fingerprint,
             sessionToken: data.sessionToken
         };
@@ -736,7 +738,10 @@ function renderShares(shares) {
         info.className = 'share-item-info';
         const name = document.createElement('div');
         name.className = 'share-item-name';
-        name.textContent = s.original_name;
+        name.textContent = Number(s.format) === 2 ? '…' : s.original_name;
+        if (Number(s.format) === 2) {
+            CryptoUtils.ownerShareName(currentUser.privateKey, s.owner_key, s.original_name).then(n => { name.textContent = n; });
+        }
         const meta = document.createElement('div');
         meta.className = 'share-item-meta';
         const downloads = s.max_downloads > 0 ? `${s.download_count}/${s.max_downloads} downloads` : `${s.download_count} downloads`;
@@ -1049,8 +1054,11 @@ async function handleShareUpload() {
         formData.append('keyIv', CryptoUtils.bufferToBase64(keyIv));
         formData.append('salt', salt);
         formData.append('fileIv', CryptoUtils.bufferToBase64(fileIv));
-        formData.append('originalName', file.name);
-        formData.append('mimeType', file.type || 'application/octet-stream');
+        // Format 2: the name is sealed with a key derived from the file key, and the owner keeps only
+        // that name key, wrapped with their own public key, to list the share by name. No type is sent.
+        formData.append('format', '2');
+        formData.append('originalName', await CryptoUtils.sealShareName(rawKey, file.name));
+        formData.append('ownerKey', await CryptoUtils.wrapShareNameKeyForOwner(currentUser.publicKey, rawKey));
         formData.append('maxDownloads', maxDownloads);
         formData.append('expiresIn', expiresIn);
         formData.append('downloadProof', await CryptoUtils.shareDownloadProof(rawKey));
