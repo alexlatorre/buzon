@@ -53,7 +53,7 @@ function loadAppPage({ fetch, confirm = () => true, storage = new Map(), hidden 
     const URL_ = { createObjectURL: blob => { saved.push(blob); return `blob:${saved.length}`; }, revokeObjectURL() {} };
     const alerts = [];
     const code = `${read('crypto.js')}\n${read('app.js')}\nreturn {
-        openPackage, downloadFile, handleLogin, handleRegister, handleShareUpload, fetchShares, handleChangePassword, logout: secureLogout,
+        openPackage, downloadFile, handleLogin, handleRegister, handleShareUpload, fetchShares, handleChangePassword, handleRotateKeys, replaceOneTimeLinks, logout: secureLogout,
         get user() { return currentUser; }, set user(v) { currentUser = v; },
         set packages(v) { currentPackages = v; }
     };`;

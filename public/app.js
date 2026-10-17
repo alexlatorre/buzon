@@ -9,6 +9,8 @@ let currentUser = {
 
 let currentPackages = [];
 let selectedPackage = null;
+// Bumped when this session's keys change (key rotation): a list fetched before holds the old wrapped keys
+let keyGeneration = 0;
 
 // SQLite returns "YYYY-MM-DD HH:MM:SS" in UTC without a zone marker; read it as UTC, not local time
 function parseServerDate(value) {
@@ -83,7 +85,7 @@ async function checkedLoginParams(username) {
 }
 
 const LOGIN_PARAMS_CHANGED = 'The server sent different login parameters for this account than on your last login in this browser.\n\n'
-    + 'That is expected only if you changed your password on another device, or the account was deleted and created again. If not, cancel: '
+    + 'That is expected only if you changed your password or rotated your keys on another device, or the account was deleted and created again. If not, cancel: '
     + 'the server may be trying to collect a hash of your password.\n\nContinue?';
 
 async function handleRegister() {
@@ -257,13 +259,14 @@ async function handleLogin() {
 }
 
 // Authenticated request: on 401 (session expired after 24 h, or the server restarted) go back to the
-// login screen and say why, instead of leaving a dashboard where nothing works
-async function authFetch(url, options = {}) {
+// login screen and say why, instead of leaving a dashboard where nothing works. A long operation passes
+// the account it started for, so a logout and a new login meanwhile never lend it the new session
+async function authFetch(url, options = {}, user = currentUser) {
     const res = await fetch(url, {
         ...options,
-        headers: { ...(options.headers || {}), 'Authorization': `Bearer ${currentUser.sessionToken}` }
+        headers: { ...(options.headers || {}), 'Authorization': `Bearer ${user.sessionToken}` }
     });
-    if (res.status === 401 && currentUser.sessionToken) {
+    if (res.status === 401 && user === currentUser && currentUser.sessionToken) {
         secureLogout();
         showMsg('Session expired. Please log in again.', 'error');
         throw new Error('Session expired');
@@ -308,6 +311,7 @@ function secureLogout() {
         document.getElementById('share-note').value = '';
         shareResultLink.value = '';
         closePasswordModal();
+        resetRotateModal();
         // Close the mobile drawer, or it greets the next person who logs in
         sidebar.classList.remove('sidebar-open');
         sidebarOverlay.classList.remove('active');
@@ -335,12 +339,13 @@ async function fetchPackages() {
 
     btnRefresh.textContent = 'Scanning...';
     fetchOneTimeLinks(); // a link may have been used since the last refresh
+    const generation = keyGeneration;
     try {
         const res = await authFetch(`/api/packages/${currentUser.id}`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
         const data = await res.json();
-        if (res.ok) {
+        if (res.ok && generation === keyGeneration) {
             currentPackages = data;
             renderPackages();
         }
@@ -724,11 +729,13 @@ const shareListUI = document.getElementById('share-list');
 
 async function fetchShares() {
     if (!currentUser || !currentUser.id) return;
+    const generation = keyGeneration;
     try {
         const res = await authFetch(`/api/shares/${currentUser.id}`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
-        if (res.ok) renderShares(await res.json());
+        const shares = res.ok ? await res.json() : null;
+        if (shares && generation === keyGeneration) renderShares(shares);
     } catch (e) {
         console.error('Failed to fetch shares', e);
     }
@@ -890,6 +897,8 @@ const passwordModal = document.getElementById('password-modal');
 const pwMsg = document.getElementById('pw-msg');
 const btnChangePassword = document.getElementById('btn-change-password');
 const MIN_ACCOUNT_PASSWORD_LENGTH = 8; // as in handleRegister
+// A password change and a key rotation both replace the vault: only one at a time
+let changingPassword = false;
 
 function setPasswordMsg(text, type = 'info') {
     pwMsg.textContent = text;
@@ -916,7 +925,10 @@ async function handleChangePassword() {
     if (next.length < MIN_ACCOUNT_PASSWORD_LENGTH) return setPasswordMsg(`The new password needs at least ${MIN_ACCOUNT_PASSWORD_LENGTH} characters.`, 'error');
     if (next !== repeat) return setPasswordMsg('The new passwords do not match.', 'error');
     if (next === current) return setPasswordMsg('The new password is the same as the current one.', 'error');
+    if (rotatingKeys) return setPasswordMsg('Wait until the key rotation finishes.', 'error');
+    if (changingPassword) return;
 
+    changingPassword = true;
     btnChangePassword.disabled = true;
     // The account this change is for: a logout while it runs must not write into the next session
     const user = currentUser;
@@ -948,7 +960,7 @@ async function handleChangePassword() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ currentServerAuthHash, salt, kdf, encryptedPrivateKey: encrypted.ciphertext, iv: encrypted.iv, serverAuthHash })
-        });
+        }, user);
         const data = await res.json().catch(() => ({}));
         if (res.status === 403) throw new Error('The current password is wrong.');
         if (!res.ok) throw new Error(data.error || 'Could not change the password.');
@@ -965,6 +977,7 @@ async function handleChangePassword() {
         if (error.message !== 'Session expired') setPasswordMsg(error.message || 'Could not change the password.', 'error');
     } finally {
         if (pkcs8Bytes) pkcs8Bytes.fill(0);
+        changingPassword = false;
         btnChangePassword.disabled = false;
     }
 }
@@ -972,6 +985,295 @@ async function handleChangePassword() {
 document.getElementById('btn-open-password').addEventListener('click', (e) => { e.preventDefault(); openPasswordModal(); });
 document.getElementById('btn-close-password').addEventListener('click', closePasswordModal);
 btnChangePassword.addEventListener('click', handleChangePassword);
+
+// --- Rotate keys ---
+// A new key pair replaces the current one, so an old copy of the encrypted private key (with the
+// password it was under) opens nothing that arrives later, nor the keys stored from now on. Only small
+// keys move: each pending package's session key and each format 2 share's owner name key are
+// unwrapped with the current private key and wrapped again for the new public key under the same
+// label; file bodies, names and messages stay as they are. The new private key is encrypted under the
+// same password with a new salt. The server applies it all at once, only if the lists cover every
+// pending package and format 2 share; if one arrives or goes meanwhile, the lists are read again.
+const rotateModal = document.getElementById('rotate-modal');
+const rotateMsg = document.getElementById('rotate-msg');
+const rotateResult = document.getElementById('rotate-result');
+const rotateNewLink = document.getElementById('rotate-new-link');
+const btnRotateKeys = document.getElementById('btn-rotate-keys');
+const btnCopyRotate = document.getElementById('btn-copy-rotate');
+const btnReplaceOtl = document.getElementById('btn-replace-otl');
+const ROTATION_ATTEMPTS = 3;
+const ROTATION_SALT_CHECKS = 3;
+const ROTATION_SALT_DELAY_MS = 1000;
+// A share wraps its owner key for the public key of the moment: none starts during a rotation, and a
+// rotation does not start while one is uploading
+let rotatingKeys = false;
+let sharesUploading = 0;
+
+function setRotateMsg(text, type = 'info') {
+    rotateMsg.textContent = text;
+    rotateMsg.className = text ? `msg ${type}` : 'msg';
+}
+
+// Everything the modal shows, cleared (logout)
+function resetRotateModal() {
+    document.getElementById('rotate-pw').value = '';
+    setRotateMsg('');
+    rotateNewLink.value = '';
+    rotateResult.classList.add('hidden');
+    btnReplaceOtl.classList.add('hidden');
+    rotateModal.classList.add('hidden');
+}
+
+// Closing only hides it: a rotation still running, and its outcome (the new link, the button that
+// replaces one-time links), are there when it opens again
+function closeRotateModal() {
+    document.getElementById('rotate-pw').value = '';
+    rotateModal.classList.add('hidden');
+}
+
+function openRotateModal() {
+    if (!rotatingKeys) btnRotateKeys.disabled = false;
+    rotateModal.classList.remove('hidden');
+    if (sidebar && sidebar.classList.contains('sidebar-open')) toggleSidebar();
+}
+
+// Every pending package key and format 2 share owner key, as the server lists them now, wrapped again
+// for newPublicKey. One the current private key cannot open goes as null: the server leaves it as it is
+async function rewrapForRotation(user, newPublicKey) {
+    const [pkgRes, shareRes] = await Promise.all([authFetch(`/api/packages/${user.id}`, {}, user), authFetch(`/api/shares/${user.id}`, {}, user)]);
+    if (!pkgRes.ok || !shareRes.ok) throw new Error('Could not read your packages and shares.');
+    const packages = [];
+    const shares = [];
+    let kept = 0;
+    for (const pkg of await pkgRes.json()) {
+        const encryptedSessionKey = await CryptoUtils.rewrapPackageKey(user.privateKey, newPublicKey, pkg);
+        if (encryptedSessionKey === null) kept++;
+        packages.push({ id: pkg.id, encryptedSessionKey });
+    }
+    for (const share of await shareRes.json()) {
+        if (Number(share.format) !== 2) continue; // format 1 shares hold nothing wrapped for the account
+        const ownerKey = await CryptoUtils.rewrapShareOwnerKey(user.privateKey, newPublicKey, share.owner_key);
+        if (ownerKey === null) kept++;
+        shares.push({ token: share.token, ownerKey });
+    }
+    return { packages, shares, kept };
+}
+
+// The answer to a rotation challenge: only the current private key opens it
+async function rotationProof(user) {
+    const res = await authFetch('/api/auth/rotate-keys/challenge', { method: 'POST' }, user);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || typeof data.challenge !== 'string') throw new Error(data.error || 'Could not start the key rotation.');
+    let challengeResponse;
+    try {
+        challengeResponse = await CryptoUtils.answerRotationChallenge(user.privateKey, data.challenge);
+    } catch (e) {
+        throw new Error('Could not prove that this session holds your current key. Log out and in again, then retry.');
+    }
+    return { challengeId: data.challengeId, challengeResponse };
+}
+
+// After an answer that got lost: whether the server has the new vault, told by the account's salt
+// (true, false, or null when that cannot be told either). The request may still be running there, so
+// an unchanged salt is read again a few times before it counts
+async function rotationApplied(user, newSalt) {
+    const oldSalt = CryptoUtils.bufferToBase64(user.vaultParams.salt);
+    for (let check = 1; ; check++) {
+        let salt = null;
+        try {
+            const res = await fetch(`/api/auth/salt/${encodeURIComponent(user.username)}`);
+            if (res.ok) salt = (await res.json()).salt;
+        } catch (e) {
+            // unknown: counts as neither
+        }
+        if (salt === newSalt) return true;
+        if (salt !== oldSalt) return null;
+        if (check === ROTATION_SALT_CHECKS) return false;
+        await new Promise(resolve => setTimeout(resolve, ROTATION_SALT_DELAY_MS));
+    }
+}
+
+async function handleRotateKeys() {
+    const password = document.getElementById('rotate-pw').value;
+    if (!password) return setRotateMsg('Enter your password.', 'error');
+    if (rotatingKeys) return;
+    if (sharesUploading > 0) return setRotateMsg('Wait until your share upload finishes.', 'error');
+    if (changingPassword) return setRotateMsg('Wait until the password change finishes.', 'error');
+
+    rotatingKeys = true;
+    btnRotateKeys.disabled = true;
+    rotateResult.classList.add('hidden');
+    // The account this rotation is for: a logout while it runs must not write into the next session
+    const user = currentUser;
+    // Progress and errors only while this rotation's session is the one shown
+    const say = (text, type) => { if (user === currentUser) setRotateMsg(text, type); };
+    let pkcs8Bytes = null;
+    try {
+        // 1. The password must decrypt the stored private key to the key this session uses, with the
+        // salt and key derivation checked at login
+        say('Checking the password...', 'info');
+        const masterKey = await CryptoUtils.deriveMasterKey(password, user.vaultParams.salt, true, user.vaultParams.iterations);
+        const currentServerAuthHash = await CryptoUtils.computeServerAuthHash(masterKey);
+        let currentPkcs8;
+        try {
+            currentPkcs8 = new Uint8Array(await CryptoUtils.decryptSymmetric(masterKey, user.encryptedPrivateKey, user.privateKeyIv));
+        } catch (e) {
+            throw new Error('The password is wrong.');
+        }
+        const currentFingerprint = await CryptoUtils.fingerprintFromPkcs8(new TextDecoder().decode(currentPkcs8));
+        currentPkcs8.fill(0);
+        if (currentFingerprint !== user.keyFingerprint) throw new Error('The password is wrong.');
+
+        // 2. The new key pair, its private key encrypted under the same password with a new salt
+        say('Generating a new RSA-4096 key pair... (might take a few seconds)', 'info');
+        const pair = await CryptoUtils.generateRSAKeyPair();
+        const publicKey = await CryptoUtils.exportPublicKey(pair.publicKey);
+        const pkcs8 = await CryptoUtils.exportPrivateKey(pair.privateKey);
+        pkcs8Bytes = new TextEncoder().encode(pkcs8);
+        const kdf = CryptoUtils.KDF_DEFAULT;
+        const salt = CryptoUtils.generateSalt();
+        const vaultKey = await CryptoUtils.deriveMasterKey(password, CryptoUtils.base64ToBuffer(salt), true, CryptoUtils.parseKdf(kdf));
+        const encrypted = await CryptoUtils.encryptSymmetric(vaultKey, pkcs8Bytes);
+        const serverAuthHash = await CryptoUtils.computeServerAuthHash(vaultKey);
+        // Ready before anything is sent: once the server has the new keys, this session has them too
+        const next = {
+            privateKey: await CryptoUtils.importPrivateKey(pkcs8),
+            publicKey: await CryptoUtils.publicKeyFromPkcs8(pkcs8),
+            keyFingerprint: await CryptoUtils.fingerprintFromPkcs8(pkcs8)
+        };
+
+        // 3. Every package and share key moved to the new public key, read again if the lists changed.
+        // Each attempt also proves this session holds the current private key (a fresh challenge)
+        let kept = 0;
+        for (let attempt = 1; ; attempt++) {
+            say('Moving your package and share keys to the new key pair...', 'info');
+            const lists = await rewrapForRotation(user, pair.publicKey);
+            const proof = await rotationProof(user);
+            let res = null;
+            let data = {};
+            try {
+                res = await authFetch('/api/auth/rotate-keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        currentServerAuthHash, ...proof, publicKey, salt, kdf, encryptedPrivateKey: encrypted.ciphertext, iv: encrypted.iv,
+                        serverAuthHash, packages: lists.packages, shares: lists.shares
+                    })
+                }, user);
+                data = await res.json().catch(() => ({}));
+            } catch (e) {
+                if (e.message === 'Session expired') throw e;
+            }
+            // No answer, a server or proxy error page, or a success that is not the server's: the
+            // rotation may have gone through anyway
+            if (!res || res.status >= 500 || (res.ok && data.success !== true)) {
+                const applied = await rotationApplied(user, salt);
+                if (applied === false) throw new Error('The server could not rotate the keys. Nothing changed: try again.');
+                if (applied === null) {
+                    if (user === currentUser) {
+                        secureLogout();
+                        showMsg('The connection failed while your keys were rotated. Log in again: if the login says the parameters changed, that is the rotation.', 'error');
+                    }
+                    return;
+                }
+            } else if (!res.ok) {
+                if (res.status === 409 && data.code === 'lists-changed') {
+                    if (attempt < ROTATION_ATTEMPTS) continue;
+                    throw new Error('Packages kept arriving while the keys were being moved. Turn off the public link for a moment and try again.');
+                }
+                if (res.status === 403 && data.code === 'key-proof') throw new Error('Could not prove that this session holds your current key. Log out and in again, then retry.');
+                if (res.status === 403) throw new Error('The password is wrong.');
+                if (res.status === 413) throw new Error('Too many packages to move at once: destroy some and try again.');
+                throw new Error(data.error || 'Could not rotate the keys.');
+            }
+            kept = lists.kept;
+            break;
+        }
+
+        // 4. The new keys from here on; the pin follows the new salt even if this session has ended
+        await CryptoUtils.pinLogin(loginStorage(), user.username, CryptoUtils.loginParams(kdf, salt));
+        if (user !== currentUser) return; // logged out meanwhile: the rotation is done, nothing to show
+        Object.assign(user, next, {
+            encryptedPrivateKey: encrypted.ciphertext,
+            privateKeyIv: encrypted.iv,
+            vaultParams: { salt: CryptoUtils.base64ToBuffer(salt), iterations: CryptoUtils.parseKdf(kdf) }
+        });
+        const dropUrl = CryptoUtils.dropLink(window.location.origin, user.id, user.keyFingerprint);
+        dropLink.href = dropUrl;
+        dropLink.textContent = dropUrl;
+        rotateNewLink.value = dropUrl;
+        rotateResult.classList.remove('hidden');
+        document.getElementById('rotate-pw').value = '';
+        // The list in memory holds the old wrapped keys: drop it before anything opens from it, and
+        // any list still on its way
+        keyGeneration++;
+        currentPackages = [];
+        fetchPackages();
+        fetchShares();
+        // Every link given out carries the old fingerprint: say which ones stop working
+        const unused = await unusedOneTimeLinks(user).catch(() => null);
+        if (user !== currentUser) return;
+        const otlText = unused === null ? ' and any one-time links you gave out'
+            : unused.length ? ` and your ${unused.length} unused one-time link(s) (copy them again from the sidebar, or replace them with new ones)` : '';
+        btnReplaceOtl.classList.toggle('hidden', !(unused && unused.length));
+        setRotateMsg(`Keys rotated. Your new key fingerprint is ${user.keyFingerprint}. These links no longer work on the send page: `
+            + `your public drop link${otlText}. Share the new link below. Your other sessions were logged out.`
+            + (kept ? ` ${kept} key(s) that your previous key could not open were left as they were.` : ''), 'success');
+    } catch (error) {
+        console.error('Rotate keys error:', error);
+        if (error.message !== 'Session expired') say(error.message || 'Could not rotate the keys.', 'error');
+    } finally {
+        if (pkcs8Bytes) pkcs8Bytes.fill(0);
+        rotatingKeys = false;
+        btnRotateKeys.disabled = false;
+    }
+}
+
+async function unusedOneTimeLinks(user) {
+    const res = await authFetch(`/api/user/${user.id}/one-time-links`, {}, user);
+    if (!res.ok) throw new Error('Could not read your one-time links.');
+    return res.json();
+}
+
+// One-time links keep their token through a rotation; new ones make those already given out unusable
+async function replaceOneTimeLinks() {
+    const user = currentUser;
+    btnReplaceOtl.disabled = true;
+    try {
+        const links = await unusedOneTimeLinks(user);
+        for (const link of links) {
+            const created = await authFetch(`/api/user/${user.id}/one-time-link`, { method: 'POST' }, user);
+            if (!created.ok) throw new Error('Could not create a one-time link.');
+            const removed = await authFetch(`/api/user/${user.id}/one-time-link/${link.token}`, { method: 'DELETE' }, user);
+            if (!removed.ok) throw new Error('Could not delete a one-time link.');
+        }
+        if (user !== currentUser) return;
+        btnReplaceOtl.classList.add('hidden');
+        setRotateMsg(`${links.length} one-time link(s) replaced: the old ones no longer work. Copy the new ones from the sidebar.`, 'success');
+    } catch (error) {
+        console.error('Replace one-time links error:', error);
+        if (error.message !== 'Session expired') setRotateMsg(error.message, 'error');
+    } finally {
+        btnReplaceOtl.disabled = false;
+        fetchOneTimeLinks();
+    }
+}
+
+document.getElementById('btn-open-rotate').addEventListener('click', (e) => { e.preventDefault(); openRotateModal(); });
+btnReplaceOtl.addEventListener('click', replaceOneTimeLinks);
+document.getElementById('btn-close-rotate').addEventListener('click', closeRotateModal);
+btnRotateKeys.addEventListener('click', handleRotateKeys);
+btnCopyRotate.addEventListener('click', () => {
+    rotateNewLink.select();
+    navigator.clipboard.writeText(rotateNewLink.value).then(() => {
+        btnCopyRotate.textContent = '✅ Copied!';
+        setTimeout(() => { btnCopyRotate.textContent = '📋 Copy Link'; }, 2000);
+    }).catch(() => {
+        // The link is still selected: let the user copy it by hand
+        btnCopyRotate.textContent = 'Press Ctrl+C to copy';
+        setTimeout(() => { btnCopyRotate.textContent = '📋 Copy Link'; }, 3000);
+    });
+});
 
 // Mobile Sidebar Toggle
 const btnMenu = document.getElementById('btn-menu');
@@ -1108,10 +1410,17 @@ async function handleShareUpload() {
         return;
     }
 
+    if (rotatingKeys) {
+        shareUploadMsg.textContent = 'Wait until the key rotation finishes.';
+        shareUploadMsg.className = 'msg error';
+        return;
+    }
+
     const file = fileInput.files[0];
     btnShareUpload.disabled = true;
     shareUploadMsg.className = 'msg info';
 
+    sharesUploading++;
     try {
         // 1. Read file
         btnShareUpload.textContent = '📖 Reading file...';
@@ -1198,6 +1507,8 @@ async function handleShareUpload() {
         shareUploadMsg.className = 'msg error';
         btnShareUpload.disabled = false;
         btnShareUpload.textContent = '🔐 Encrypt & Share';
+    } finally {
+        sharesUploading--;
     }
 }
 

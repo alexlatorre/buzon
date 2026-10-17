@@ -166,6 +166,38 @@ module.exports = {
             .run(salt, kdf, encryptedPrivateKey, iv, serverAuthHash, userId, expectedAuthHash).changes > 0;
     },
 
+    // Key rotation, all or nothing: the new public key and vault, and every re-wrapped key (null leaves
+    // one as it is). Only while the auth hash is still the one checked ('vault' otherwise) and only if
+    // the lists name exactly the user's pending packages and format 2 shares ('lists' otherwise: one
+    // left out would no longer open). 'ok' once applied
+    rotateKeys: async (userId, expectedAuthHash, vault, packages, shares) => {
+        // better-sqlite3 rolls the transaction back when its function throws
+        const abort = reason => { throw Object.assign(new Error(reason), { rotationAborted: reason }); };
+        // The same keys, each once
+        const sameKeys = (stored, given) => {
+            const set = new Set(given);
+            return stored.length === given.length && set.size === given.length && stored.every(key => set.has(key));
+        };
+        try {
+            db.transaction(() => {
+                const updated = db.prepare('UPDATE users SET public_key = ?, salt = ?, kdf = ?, encrypted_private_key = ?, iv = ?, server_auth_hash = ? WHERE id = ? AND server_auth_hash = ?')
+                    .run(vault.publicKey, vault.salt, vault.kdf, vault.encryptedPrivateKey, vault.iv, vault.serverAuthHash, userId, expectedAuthHash);
+                if (updated.changes === 0) abort('vault');
+                const pending = db.prepare("SELECT id FROM packages WHERE user_id = ? AND status = 'pending'").all(userId).map(r => r.id);
+                const sealed = db.prepare('SELECT token FROM shares WHERE user_id = ? AND format = 2').all(userId).map(r => r.token);
+                if (!sameKeys(pending, packages.map(p => p.id)) || !sameKeys(sealed, shares.map(s => s.token))) abort('lists');
+                const setSessionKey = db.prepare('UPDATE packages SET encrypted_session_key = ? WHERE id = ? AND user_id = ?');
+                for (const p of packages) if (p.encryptedSessionKey !== null) setSessionKey.run(p.encryptedSessionKey, p.id, userId);
+                const setOwnerKey = db.prepare('UPDATE shares SET owner_key = ? WHERE token = ? AND user_id = ?');
+                for (const s of shares) if (s.ownerKey !== null) setOwnerKey.run(s.ownerKey, s.token, userId);
+            })();
+            return 'ok';
+        } catch (error) {
+            if (error.rotationAborted) return error.rotationAborted;
+            throw error;
+        }
+    },
+
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {
         const id = uuidv4();
         db.prepare(`

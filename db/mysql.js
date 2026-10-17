@@ -206,6 +206,57 @@ module.exports = {
         return result.affectedRows > 0;
     },
 
+    // Key rotation, all or nothing: the new public key and vault, and every re-wrapped key (null leaves
+    // one as it is). Only while the auth hash is still the one checked ('vault' otherwise) and only if
+    // the lists name exactly the user's pending packages and format 2 shares ('lists' otherwise: one
+    // left out would no longer open). 'ok' once applied. The user row stays locked until the end, and
+    // FOR UPDATE keeps new packages and shares out of the ranges read
+    rotateKeys: async (userId, expectedAuthHash, vault, packages, shares) => {
+        // The same keys, each once
+        const sameKeys = (stored, given) => {
+            const set = new Set(given);
+            return stored.length === given.length && set.size === given.length && stored.every(key => set.has(key));
+        };
+        const conn = await pool.getConnection();
+        try {
+            await conn.beginTransaction();
+            const [updated] = await conn.execute(
+                'UPDATE users SET public_key = ?, salt = ?, kdf = ?, encrypted_private_key = ?, iv = ?, server_auth_hash = ? WHERE id = ? AND server_auth_hash = ?',
+                [vault.publicKey, vault.salt, vault.kdf, vault.encryptedPrivateKey, vault.iv, vault.serverAuthHash, userId, expectedAuthHash]
+            );
+            if (updated.affectedRows === 0) {
+                await conn.rollback();
+                return 'vault';
+            }
+            const [pending] = await conn.execute("SELECT id FROM packages WHERE user_id = ? AND status = 'pending' FOR UPDATE", [userId]);
+            const [sealed] = await conn.execute('SELECT token FROM shares WHERE user_id = ? AND format = 2 FOR UPDATE', [userId]);
+            if (!sameKeys(pending.map(r => r.id), packages.map(p => p.id)) || !sameKeys(sealed.map(r => r.token), shares.map(s => s.token))) {
+                await conn.rollback();
+                return 'lists';
+            }
+            for (const p of packages) {
+                if (p.encryptedSessionKey !== null) {
+                    await conn.execute('UPDATE packages SET encrypted_session_key = ? WHERE id = ? AND user_id = ?', [p.encryptedSessionKey, p.id, userId]);
+                }
+            }
+            for (const s of shares) {
+                if (s.ownerKey !== null) {
+                    await conn.execute('UPDATE shares SET owner_key = ? WHERE token = ? AND user_id = ?', [s.ownerKey, s.token, userId]);
+                }
+            }
+            await conn.commit();
+            return 'ok';
+        } catch (error) {
+            await conn.rollback().catch(() => {});
+            // InnoDB undid this transaction to break a deadlock (with a package being deleted, say): the
+            // page reads the lists again, as when one changed
+            if (error.code === 'ER_LOCK_DEADLOCK') return 'lists';
+            throw error;
+        } finally {
+            conn.release();
+        }
+    },
+
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {
         const id = uuidv4();
         await pool.execute(

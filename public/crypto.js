@@ -338,14 +338,20 @@ const CryptoUtils = {
         return this.bufferToBase64(window.crypto.getRandomValues(new Uint8Array(16))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     },
 
+    // RSA-OAEP parameters of a package's session key: format 2 under its own label, format 1 without one
+    dropKeyParams: function (format) {
+        return Number(format) === 2
+            ? { name: "RSA-OAEP", label: new TextEncoder().encode(this.DROP_V2.SESSION_KEY_LABEL) }
+            : { name: "RSA-OAEP" };
+    },
+
     // Sender side: everything the server stores for one package. files: [{ name, data: ArrayBuffer }];
     // sender: the name the sender typed, sealed in the message so the server cannot change it unnoticed
     encryptDropPackage: async function (publicKey, text, files, sender) {
         const encoder = new TextEncoder();
         const sessionKey = await this.generateSessionKey();
         const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
-        const wrapped = await window.crypto.subtle.encrypt(
-            { name: "RSA-OAEP", label: encoder.encode(this.DROP_V2.SESSION_KEY_LABEL) }, publicKey, rawKey);
+        const wrapped = await window.crypto.subtle.encrypt(this.dropKeyParams(2), publicKey, rawKey);
 
         const ids = files.map(() => this.randomId());
         const message = await this.aesGcmEncrypt(sessionKey, encoder.encode(JSON.stringify({ text, sender: sender === undefined ? null : this.cleanSenderName(sender), files: ids })), this.DROP_V2.MESSAGE);
@@ -377,10 +383,7 @@ const CryptoUtils = {
     // sender the sealed sender name (both null for format 1, which has neither)
     openDropPackage: async function (privateKey, pkg) {
         const format = Number(pkg.format) === 2 ? 2 : 1;
-        const params = format === 2
-            ? { name: "RSA-OAEP", label: new TextEncoder().encode(this.DROP_V2.SESSION_KEY_LABEL) }
-            : { name: "RSA-OAEP" };
-        const rawKey = await window.crypto.subtle.decrypt(params, privateKey, this.base64ToBuffer(pkg.encrypted_session_key));
+        const rawKey = await window.crypto.subtle.decrypt(this.dropKeyParams(format), privateKey, this.base64ToBuffer(pkg.encrypted_session_key));
         const sessionKey = await this.importSessionKey(this.bufferToBase64(rawKey));
         if (format === 1) {
             const text = new TextDecoder().decode(await this.decryptSymmetric(sessionKey, pkg.encrypted_message, pkg.message_iv));
@@ -501,16 +504,30 @@ const CryptoUtils = {
     MIGRATION_CHALLENGE_LABEL: "shadowdrop/migration-challenge/v1",
     MIGRATION_RESPONSE_PREFIX: "shadowdrop/migration-response/v1",
 
-    answerMigrationChallenge: async function (privateKey, challengeBase64) {
+    answerMigrationChallenge: function (privateKey, challengeBase64) {
+        return this.answerKeyChallenge(privateKey, challengeBase64, this.MIGRATION_CHALLENGE_LABEL, this.MIGRATION_RESPONSE_PREFIX, "migration");
+    },
+
+    // Key rotation: the same kind of proof that this session holds the current private key, under its
+    // own label and prefix (both must match server.js)
+    ROTATION_CHALLENGE_LABEL: "shadowdrop/rotation-challenge/v1",
+    ROTATION_RESPONSE_PREFIX: "shadowdrop/rotation-response/v1",
+
+    answerRotationChallenge: function (privateKey, challengeBase64) {
+        return this.answerKeyChallenge(privateKey, challengeBase64, this.ROTATION_CHALLENGE_LABEL, this.ROTATION_RESPONSE_PREFIX, "rotation");
+    },
+
+    // A 32-byte nonce decrypted only under `label`, answered with SHA-256(prefix || nonce)
+    answerKeyChallenge: async function (privateKey, challengeBase64, label, responsePrefix, kind) {
         const encoder = new TextEncoder();
         const nonce = new Uint8Array(await window.crypto.subtle.decrypt(
-            { name: "RSA-OAEP", label: encoder.encode(this.MIGRATION_CHALLENGE_LABEL) },
+            { name: "RSA-OAEP", label: encoder.encode(label) },
             privateKey,
             this.base64ToBuffer(challengeBase64)
         ));
-        if (nonce.byteLength !== 32) throw new Error("Unexpected migration challenge");
+        if (nonce.byteLength !== 32) throw new Error(`Unexpected ${kind} challenge`);
 
-        const prefix = encoder.encode(this.MIGRATION_RESPONSE_PREFIX);
+        const prefix = encoder.encode(responsePrefix);
         const combined = new Uint8Array(prefix.byteLength + nonce.byteLength);
         combined.set(prefix, 0);
         combined.set(nonce, prefix.byteLength);
@@ -563,20 +580,50 @@ const CryptoUtils = {
         return this.openSealedShareName(await this.importShareNameKey(await this.shareNameKeyBytes(rawFileKey), ["decrypt"]), sealed);
     },
 
+    // RSA-OAEP parameters of the owner's copy of a share's name key
+    ownerKeyParams: function () {
+        return { name: "RSA-OAEP", label: new TextEncoder().encode(this.SHARE_V2.OWNER_KEY_LABEL) };
+    },
+
     wrapShareNameKeyForOwner: async function (ownerPublicKey, rawFileKey) {
-        const wrapped = await window.crypto.subtle.encrypt(
-            { name: "RSA-OAEP", label: new TextEncoder().encode(this.SHARE_V2.OWNER_KEY_LABEL) }, ownerPublicKey, await this.shareNameKeyBytes(rawFileKey));
+        const wrapped = await window.crypto.subtle.encrypt(this.ownerKeyParams(), ownerPublicKey, await this.shareNameKeyBytes(rawFileKey));
         return this.bufferToBase64(wrapped);
     },
 
     // Owner side: the name of one of their format 2 shares
     ownerShareName: async function (privateKey, wrappedNameKey, sealed) {
         try {
-            const raw = await window.crypto.subtle.decrypt(
-                { name: "RSA-OAEP", label: new TextEncoder().encode(this.SHARE_V2.OWNER_KEY_LABEL) }, privateKey, this.base64ToBuffer(wrappedNameKey));
+            const raw = await window.crypto.subtle.decrypt(this.ownerKeyParams(), privateKey, this.base64ToBuffer(wrappedNameKey));
             return this.openSealedShareName(await this.importShareNameKey(raw, ["decrypt"]), sealed);
         } catch (e) {
             return "encrypted-file";
         }
+    },
+
+    // --- Key rotation ---
+    // A wrapped key unwrapped with the current private key and wrapped again for the new public key
+    // under the same OAEP parameters, so it keeps its role (a package key stays a package key). Null
+    // when the current key does not open it: it was never readable, and is left as it is
+    rewrapKey: async function (privateKey, newPublicKey, wrappedBase64, params) {
+        let raw;
+        try {
+            raw = new Uint8Array(await window.crypto.subtle.decrypt(params, privateKey, this.base64ToBuffer(wrappedBase64)));
+        } catch (e) {
+            return null;
+        }
+        try {
+            return this.bufferToBase64(await window.crypto.subtle.encrypt(params, newPublicKey, raw));
+        } finally {
+            raw.fill(0);
+        }
+    },
+
+    // pkg as the inbox API lists it
+    rewrapPackageKey: function (privateKey, newPublicKey, pkg) {
+        return this.rewrapKey(privateKey, newPublicKey, pkg.encrypted_session_key, this.dropKeyParams(pkg.format));
+    },
+
+    rewrapShareOwnerKey: function (privateKey, newPublicKey, wrappedNameKey) {
+        return this.rewrapKey(privateKey, newPublicKey, wrappedNameKey, this.ownerKeyParams());
     }
 };

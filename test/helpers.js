@@ -123,8 +123,8 @@ function client(base) {
         return res;
     }
 
-    // Same steps as public/drop.js (format 2, through the real crypto.js)
-    async function drop(linkId, publicKeyB64, files, senderName = 'Tester') {
+    // Same steps as public/drop.js (format 2, through the real crypto.js); extra: more form fields
+    async function drop(linkId, publicKeyB64, files, senderName = 'Tester', extra = {}) {
         const publicKey = await subtle.importKey('spki', unb64(publicKeyB64), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']);
         const pkg = await CryptoUtils.encryptDropPackage(publicKey, 'hello',
             files.map(f => ({ name: f.name, data: new TextEncoder().encode(f.content) })));
@@ -136,6 +136,7 @@ function client(base) {
         form.append('messageIv', pkg.messageIv);
         pkg.bodies.forEach(body => form.append('files', new Blob([body], { type: 'application/octet-stream' }), 'encrypted.bin'));
         form.append('fileNames', JSON.stringify(pkg.names));
+        for (const [k, v] of Object.entries(extra)) form.append(k, v);
         const res = await fetch(`${base}/api/drop/${linkId}`, { method: 'POST', body: form });
         return { status: res.status, data: await res.json().catch(() => null), sessionKey: pkg.sessionKey };
     }
@@ -159,7 +160,40 @@ function client(base) {
         return { status: res.status, data: await res.json().catch(() => null) };
     }
 
-    return { json, register, login, drop, share, shareFields };
+    // What handleRotateKeys in public/app.js sends (RSA-2048 to keep tests fast): the answer to a
+    // rotation challenge, a new key pair, its private key under the same password with a new salt, and
+    // every pending package key and format 2 share owner key wrapped again from user.privateKey (null
+    // where it does not open). Also returns the new key pair
+    async function rotationBody(user, token) {
+        const salt = await json('GET', `/api/auth/salt/${encodeURIComponent(user.username)}`);
+        const currentServerAuthHash = await computeServerAuthHash(await deriveMasterKey(user.password, unb64(salt.data.salt)));
+        const pair = await subtle.generateKey(
+            { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+            true, ['encrypt', 'decrypt']
+        );
+        const newSalt = globalThis.crypto.getRandomValues(new Uint8Array(16));
+        const masterKey = await deriveMasterKey(user.password, newSalt);
+        const encPriv = await aesEncrypt(masterKey, new TextEncoder().encode(b64(await subtle.exportKey('pkcs8', pair.privateKey))));
+        const packages = [];
+        for (const pkg of (await json('GET', `/api/packages/${user.id}`, null, token)).data) {
+            packages.push({ id: pkg.id, encryptedSessionKey: await CryptoUtils.rewrapPackageKey(user.privateKey, pair.publicKey, pkg) });
+        }
+        const shares = [];
+        for (const s of (await json('GET', `/api/shares/${user.id}`, null, token)).data) {
+            if (Number(s.format) === 2) shares.push({ token: s.token, ownerKey: await CryptoUtils.rewrapShareOwnerKey(user.privateKey, pair.publicKey, s.owner_key) });
+        }
+        // Proof of holding the current private key
+        const challenge = (await json('POST', '/api/auth/rotate-keys/challenge', null, token)).data;
+        const challengeResponse = await CryptoUtils.answerRotationChallenge(user.privateKey, challenge.challenge);
+        const body = {
+            currentServerAuthHash, challengeId: challenge.challengeId, challengeResponse,
+            publicKey: b64(await subtle.exportKey('spki', pair.publicKey)), salt: b64(newSalt), kdf: 'pbkdf2-sha256:600000',
+            encryptedPrivateKey: encPriv.ciphertext, iv: encPriv.iv, serverAuthHash: await computeServerAuthHash(masterKey), packages, shares
+        };
+        return { body, privateKey: pair.privateKey, publicKey: body.publicKey };
+    }
+
+    return { json, register, login, drop, share, shareFields, rotationBody };
 }
 
 

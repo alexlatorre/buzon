@@ -97,21 +97,34 @@ const migrationChallenges = new Map(); // challengeId -> { userId, expectedRespo
 const CHALLENGE_TTL = 5 * 60 * 1000;
 const MAX_PENDING_CHALLENGES = 20; // per user; the oldest is dropped beyond this
 
-function createMigrationChallenge(user) {
+// Proof of holding an account's private key: a random nonce encrypted to its public key under a label
+// of its own, answered with a hash of the nonce (never the nonce itself). Kept in `store` per attempt
+function createKeyChallenge(store, user, label, responsePrefix) {
     const nonce = crypto.randomBytes(32);
     const publicKey = crypto.createPublicKey({ key: Buffer.from(user.public_key, 'base64'), format: 'der', type: 'spki' });
     const encrypted = crypto.publicEncrypt(
-        { key: publicKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256', oaepLabel: MIGRATION_CHALLENGE_LABEL },
+        { key: publicKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256', oaepLabel: label },
         nonce
     );
-    const expectedResponse = crypto.createHash('sha256').update(MIGRATION_RESPONSE_PREFIX).update(nonce).digest('base64');
+    const expectedResponse = crypto.createHash('sha256').update(responsePrefix).update(nonce).digest('base64');
 
-    const pending = [...migrationChallenges].filter(([, c]) => c.userId === user.id);
-    if (pending.length >= MAX_PENDING_CHALLENGES) migrationChallenges.delete(pending[0][0]);
+    const pending = [...store].filter(([, c]) => c.userId === user.id);
+    if (pending.length >= MAX_PENDING_CHALLENGES) store.delete(pending[0][0]);
     const challengeId = crypto.randomUUID();
-    migrationChallenges.set(challengeId, { userId: user.id, expectedResponse, expiresAt: Date.now() + CHALLENGE_TTL });
+    store.set(challengeId, { userId: user.id, publicKey: user.public_key, expectedResponse, expiresAt: Date.now() + CHALLENGE_TTL });
     return { challengeId, challenge: encrypted.toString('base64') };
 }
+
+function createMigrationChallenge(user) {
+    return createKeyChallenge(migrationChallenges, user, MIGRATION_CHALLENGE_LABEL, MIGRATION_RESPONSE_PREFIX);
+}
+
+// A key rotation must come from whoever holds the current private key, not only the login auth hash
+// (which a login request carries): otherwise that hash alone could swap the public key senders get.
+// Own label and prefix, both in public/crypto.js too
+const ROTATION_CHALLENGE_LABEL = Buffer.from('shadowdrop/rotation-challenge/v1');
+const ROTATION_RESPONSE_PREFIX = Buffer.from('shadowdrop/rotation-response/v1');
+const rotationChallenges = new Map(); // challengeId -> { userId, publicKey, expectedResponse, expiresAt }
 
 // Cleanup expired sessions and challenges every hour
 setInterval(() => {
@@ -119,8 +132,10 @@ setInterval(() => {
     for (const [token, session] of sessions) {
         if (now - session.createdAt > SESSION_TTL) sessions.delete(token);
     }
-    for (const [challengeId, challenge] of migrationChallenges) {
-        if (challenge.expiresAt < now) migrationChallenges.delete(challengeId);
+    for (const store of [migrationChallenges, rotationChallenges]) {
+        for (const [challengeId, challenge] of store) {
+            if (challenge.expiresAt < now) store.delete(challengeId);
+        }
     }
 }, 60 * 60 * 1000);
 
@@ -242,7 +257,13 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(express.json({ limit: '5mb' }));
+// A key rotation carries one re-wrapped key per package and share, so it may be larger; its body is
+// read by its own parser, only once the session has been checked
+const ROTATE_KEYS_PATH = '/api/auth/rotate-keys';
+const jsonBody = express.json({ limit: '5mb' });
+// As Express routes it: any case, one trailing slash
+const isRotateKeysPath = p => p.toLowerCase().replace(/\/$/, '') === ROTATE_KEYS_PATH;
+app.use((req, res, next) => (isRotateKeysPath(req.path) ? next() : jsonBody(req, res, next)));
 // Express 5 leaves req.body undefined without a JSON body; handlers then answer 400 instead of crashing
 app.use((req, res, next) => {
     if (req.body === undefined) req.body = {};
@@ -318,7 +339,15 @@ function dropFieldsError(body, files) {
     if (fileCount === 0 && messageBytes === 16) return 'Nothing to send';
     if (!optionalString(body.senderName, 256)) return 'Invalid sender name';
     if (!optionalString(body.fileNames, MAX_FIELD_SIZE)) return 'Invalid file names';
+    if (body.keyFingerprint !== undefined && !(typeof body.keyFingerprint === 'string' && KEY_FINGERPRINT_REGEX.test(body.keyFingerprint))) return 'Invalid key fingerprint';
     return null;
+}
+
+// Fingerprint of a public key as public/crypto.js publicKeyFingerprint computes it (the "#k=" of drop
+// links): base64url SHA-256 of the SPKI, 22 characters
+const KEY_FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{22}$/;
+function publicKeyFingerprint(spkiBase64) {
+    return crypto.createHash('sha256').update(Buffer.from(spkiBase64, 'base64')).digest('base64url').slice(0, 22);
 }
 
 // Wrapped AES-256 key (32 + 16 tag), 12-byte IVs, 16-byte PBKDF2 salt, values the dashboard offers
@@ -373,6 +402,7 @@ function removeUploadedFiles(req) {
 // Quota is check-then-insert. With MySQL every query yields to the event loop, so concurrent uploads
 // for the same user could all pass the check; this serialises that section per user. It is an
 // in-process lock: enough for the single Node process this app runs as, not for several replicas.
+// Key rotations, password changes and logins take it too, so sessions and keys change together.
 const quotaLocks = new Map(); // userId -> promise of the last holder
 async function lockUserQuota(userId) {
     const previous = quotaLocks.get(userId) || Promise.resolve();
@@ -485,12 +515,37 @@ function registrationFieldsError(body) {
     if (vaultError) return vaultError;
     const publicKeyBytes = base64Bytes(body.publicKey);
     if (publicKeyBytes < 0 || publicKeyBytes > 4096) return 'Invalid public key';
+    const bits = rsaKeyBits(body.publicKey);
+    if (!(bits >= 2048 && bits <= 8192)) return 'Invalid public key';
+    return null;
+}
+
+// Modulus length of an RSA public key (base64 SPKI), or 0 when it is not one
+function rsaKeyBits(spkiBase64) {
     try {
-        const key = crypto.createPublicKey({ key: Buffer.from(body.publicKey, 'base64'), format: 'der', type: 'spki' });
-        const bits = key.asymmetricKeyDetails && key.asymmetricKeyDetails.modulusLength;
-        if (key.asymmetricKeyType !== 'rsa' || !(bits >= 2048 && bits <= 8192)) return 'Invalid public key';
+        const key = crypto.createPublicKey({ key: Buffer.from(spkiBase64, 'base64'), format: 'der', type: 'spki' });
+        return key.asymmetricKeyType === 'rsa' && key.asymmetricKeyDetails ? key.asymmetricKeyDetails.modulusLength : 0;
     } catch {
-        return 'Invalid public key';
+        return 0;
+    }
+}
+
+// Re-wrapped keys of a key rotation: each package and share once, by its id, with an RSA-OAEP
+// ciphertext the size of the new key, or null for one the current key could not open (left as it is)
+function rotationListsError(packages, shares, newKeyBits) {
+    if (!Array.isArray(packages) || !Array.isArray(shares)) return 'Invalid key lists';
+    const wrappedSize = Math.ceil(newKeyBits / 8);
+    const ids = new Set();
+    for (const p of packages) {
+        if (!p || typeof p.id !== 'string' || !isValidUUID(p.id) || ids.has(p.id)) return 'Invalid package list';
+        if (p.encryptedSessionKey !== null && base64Bytes(p.encryptedSessionKey) !== wrappedSize) return 'Invalid session key';
+        ids.add(p.id);
+    }
+    const tokens = new Set();
+    for (const s of shares) {
+        if (!s || typeof s.token !== 'string' || !isValidUUID(s.token) || tokens.has(s.token)) return 'Invalid share list';
+        if (s.ownerKey !== null && base64Bytes(s.ownerKey) !== wrappedSize) return 'Invalid owner key';
+        tokens.add(s.token);
     }
     return null;
 }
@@ -589,15 +644,25 @@ app.post('/api/auth/login', async (req, res) => {
         // Update Last Login
         await db.updateLastLogin(user.id);
 
-        // Create session token
-        const sessionToken = createSession(user.id);
+        // The session is created under the user's lock, from the vault as it is then: a key rotation or
+        // password change (under the same lock) may have replaced it since it was read above, and ends
+        // every other session when it does, so it cannot miss this one
+        const releaseLock = await lockUserQuota(user.id);
+        let current, sessionToken;
+        try {
+            current = await db.getUserById(user.id);
+            if (current && verifyAuthHash(current.server_auth_hash, serverAuthHash)) sessionToken = createSession(user.id);
+        } finally {
+            releaseLock();
+        }
+        if (!sessionToken) return res.status(401).json({ error: 'Invalid credentials' });
 
         res.json({
-            id: user.id,
-            salt: user.salt,
-            kdf: user.kdf || DEFAULT_KDF,
-            encryptedPrivateKey: user.encrypted_private_key,
-            iv: user.iv,
+            id: current.id,
+            salt: current.salt,
+            kdf: current.kdf || DEFAULT_KDF,
+            encryptedPrivateKey: current.encrypted_private_key,
+            iv: current.iv,
             sessionToken
         });
     } catch (error) {
@@ -625,16 +690,107 @@ app.post('/api/auth/password', requireAuth, async (req, res) => {
             return res.status(403).json({ error: 'Invalid credentials' });
         }
 
-        // Only if nothing changed the vault since it was read: of two concurrent changes, one wins
-        const updated = await db.updateVault(user.id, user.server_auth_hash, body.salt, body.kdf, body.encryptedPrivateKey, body.iv, hashAuthToken(body.serverAuthHash));
-        if (!updated) return res.status(409).json({ error: 'The password was changed meanwhile' });
-        for (const [token, session] of sessions) {
-            if (session.userId === user.id && token !== req.sessionToken) sessions.delete(token);
+        // Only if nothing changed the vault since it was read: of two concurrent changes, one wins. Under
+        // the user's lock, so a login cannot create a session between the change and the purge
+        const releaseLock = await lockUserQuota(user.id);
+        let updated;
+        try {
+            updated = await db.updateVault(user.id, user.server_auth_hash, body.salt, body.kdf, body.encryptedPrivateKey, body.iv, hashAuthToken(body.serverAuthHash));
+            if (updated) {
+                for (const [token, session] of sessions) {
+                    if (session.userId === user.id && token !== req.sessionToken) sessions.delete(token);
+                }
+            }
+        } finally {
+            releaseLock();
         }
+        if (!updated) return res.status(409).json({ error: 'The password was changed meanwhile' });
         console.log(`[Auth] Password changed for account ${user.id}`);
         res.json({ success: true });
     } catch (error) {
         console.error('Change password error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Step 1 of a key rotation: a challenge only the current private key can answer (one per attempt)
+app.post('/api/auth/rotate-keys/challenge', requireAuth, async (req, res) => {
+    try {
+        const user = await db.getUserById(req.session.userId);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.server_auth_hash === LEGACY_AUTH_MARKER) return res.status(403).json({ error: 'Invalid credentials' });
+        res.json(createKeyChallenge(rotationChallenges, user, ROTATION_CHALLENGE_LABEL, ROTATION_RESPONSE_PREFIX));
+    } catch (error) {
+        console.error('Rotation challenge error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Rotate keys: the browser generates a new key pair, unwraps each pending package's session key and
+// each format 2 share's owner name key with the current private key and wraps them again for the new
+// public key (same OAEP label), and encrypts the new private key under the same password (new salt).
+// File bodies, names and messages do not change. Checked like a password change (current password's
+// auth hash, 403 if wrong), plus the answer to a rotation challenge, which proves the caller holds the
+// current private key (403 code key-proof); the lists must name every pending package and format 2 share, or the
+// rotation is refused with 409 and the page reads them again. Written in one transaction under the
+// user's upload lock, so a drop lands either before (and must be in the lists) or after (and is
+// checked against the new key). Every other session of the account ends.
+app.post(ROTATE_KEYS_PATH, requireAuth, express.json({ limit: '32mb' }), async (req, res) => {
+    try {
+        const body = req.body || {};
+        if (typeof body.currentServerAuthHash !== 'string' || body.kdf !== DEFAULT_KDF) {
+            return res.status(400).json({ error: 'Invalid request' });
+        }
+        // Only the key sizes whose wrapped keys drops and shares accept (256, 384 or 512 bytes)
+        const newKeyBits = rsaKeyBits(body.publicKey);
+        const fieldError = registrationFieldsError(body) || (![2048, 3072, 4096].includes(newKeyBits) && 'Invalid public key')
+            || rotationListsError(body.packages, body.shares, newKeyBits);
+        if (fieldError) return res.status(400).json({ error: fieldError });
+
+        const user = await db.getUserById(req.session.userId);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.server_auth_hash === LEGACY_AUTH_MARKER || !verifyAuthHash(user.server_auth_hash, body.currentServerAuthHash)) {
+            return res.status(403).json({ error: 'Invalid credentials' });
+        }
+        // ...and the current private key: the answer to a challenge made for the key the account has now
+        const challenge = typeof body.challengeId === 'string' ? rotationChallenges.get(body.challengeId) : undefined;
+        if (!challenge || challenge.userId !== user.id || challenge.publicKey !== user.public_key || challenge.expiresAt < Date.now()
+            || typeof body.challengeResponse !== 'string' || !safeEqual(challenge.expectedResponse, body.challengeResponse)) {
+            return res.status(403).json({ error: 'Proof of holding the current key required', code: 'key-proof' });
+        }
+        if (body.publicKey === user.public_key) return res.status(400).json({ error: 'The new public key is the current one' });
+        // A new salt, so the auth hash changes too: a password change that read the old vault then fails
+        // its guard instead of pairing the old private key with the new public key
+        if (body.salt === user.salt || verifyAuthHash(user.server_auth_hash, body.serverAuthHash)) {
+            return res.status(400).json({ error: 'The new vault must use a new salt' });
+        }
+
+        const vault = {
+            publicKey: body.publicKey, salt: body.salt, kdf: body.kdf, encryptedPrivateKey: body.encryptedPrivateKey,
+            iv: body.iv, serverAuthHash: hashAuthToken(body.serverAuthHash)
+        };
+        const releaseQuota = await lockUserQuota(user.id);
+        let result;
+        try {
+            result = await db.rotateKeys(user.id, user.server_auth_hash, vault, body.packages, body.shares);
+            // Still under the lock: a share another session is uploading must find its session ended
+            if (result === 'ok') {
+                rotationChallenges.delete(body.challengeId);
+                for (const [token, session] of sessions) {
+                    if (session.userId === user.id && token !== req.sessionToken) sessions.delete(token);
+                }
+            }
+        } finally {
+            releaseQuota();
+        }
+        if (result === 'vault') return res.status(409).json({ error: 'The password was changed meanwhile' });
+        if (result === 'lists') return res.status(409).json({ error: 'Packages or shares changed meanwhile', code: 'lists-changed' });
+        console.log(`[Auth] Keys rotated for account ${user.id}`);
+        // The old encrypted private key and wrapped keys must not linger in the SQLite WAL
+        await db.compact().catch(e => console.error('Database compaction error:', e.message));
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Rotate keys error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -785,6 +941,17 @@ app.post('/api/drop/:id', resolveDropTarget, upload.array('files'), async (req, 
             if (used + incomingSize > user.mailbox_quota) {
                 removeUploadedFiles(req);
                 return res.status(413).json({ error: 'Mailbox quota exceeded' });
+            }
+
+            // The send page names the key it encrypted to. If the recipient rotated their keys since it
+            // fetched that key, the package would not open with the new one: refuse it. Checked under
+            // the same lock as the rotation, so a drop is either in its list or sees the new key
+            if (req.body.keyFingerprint !== undefined) {
+                const current = await db.getUserById(userId);
+                if (!current || publicKeyFingerprint(current.public_key) !== req.body.keyFingerprint) {
+                    removeUploadedFiles(req);
+                    return res.status(409).json({ error: 'The recipient changed their keys: ask them for their new link' });
+                }
             }
 
             // Consume the one-time token atomically so two concurrent drops can't both use it
@@ -968,6 +1135,12 @@ app.post('/api/share/:userId', requireAuth, resolveShareTarget, shareUpload.sing
 
         const releaseQuota = await lockUserQuota(userId);
         try {
+            // A key rotation (which holds the same lock) ends the other sessions: a share they were
+            // still uploading has its owner key wrapped for the old public key
+            if (!validateSession(req.sessionToken)) {
+                removeUploadedFiles(req);
+                return res.status(401).json({ error: 'Invalid or expired session' });
+            }
             const usedQuota = await getStorageUsage(userId);
             if (usedQuota + req.file.size > user.mailbox_quota) {
                 removeUploadedFiles(req);

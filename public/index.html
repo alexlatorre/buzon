@@ -54,6 +54,7 @@
           <a href="#" id="nav-inbox" class="nav-item active">Inbox</a>
           <a href="#" id="btn-open-share" class="nav-item">📤 Share File</a>
           <a href="#" id="btn-open-password" class="nav-item">🔑 Change Password</a>
+          <a href="#" id="btn-open-rotate" class="nav-item">🔄 Rotate Keys</a>
         </div>
         <div class="nav-group drop-link-group">
           <p class="nav-label">Your Public Drop Link</p>
@@ -169,6 +170,35 @@
     </div>
   </div>
 
+  <div id="rotate-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🔄 Rotate Keys</h3>
+        <button id="btn-close-rotate" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="msg error">Your drop link changes. The links you already gave out, public and one-time, will stop working on the send page: share the new link again. One-time links stay valid, but copy them again from the sidebar.</p>
+        <p class="text-muted">A new key pair is generated in your browser and the keys of your pending packages and shares are moved to it; files, names and messages are not touched. Afterwards, an old copy of your encrypted private key opens nothing new, even with the password it was under: not the packages that arrive from now on, nor the keys stored on the server now. Whoever already copied a package's old wrapped key can still read that package whenever they get its files: destroy packages once downloaded. If your password may have leaked, change it first. Your other sessions are logged out.</p>
+        <div class="form-group">
+          <label for="rotate-pw">Password</label>
+          <input type="password" id="rotate-pw" autocomplete="current-password">
+        </div>
+        <p id="rotate-msg" class="msg"></p>
+        <div id="rotate-result" class="hidden">
+          <div class="form-group">
+            <label for="rotate-new-link">Your new drop link</label>
+            <input type="text" id="rotate-new-link" readonly class="share-link-input">
+          </div>
+          <button id="btn-copy-rotate" class="btn secondary full-width">📋 Copy Link</button>
+          <button id="btn-replace-otl" class="btn secondary full-width hidden">Replace one-time links</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-rotate-keys" class="btn primary">Rotate Keys</button>
+      </div>
+    </div>
+  </div>
+
   <div id="share-modal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
@@ -238,8 +268,8 @@
     </div>
   </div>
 
-  <script src="crypto.js" integrity="sha256-jEHcMyvJtySoCCZaWIcRN97X8un/1l7ProT4rTQuZrM="></script>
+  <script src="crypto.js" integrity="sha256-0YEvKKaT55LR8djOFlG3KaF8UpyzuOpVVYCKWxhpZtk="></script>
   <script src="integrity.js" integrity="sha256-GHTVHMEFRkSi0ete7DR4wC7D+425USMOf01v7XJWBGU="></script>
-  <script src="app.js" integrity="sha256-SHfrcqfOeXtAwgnpOuMfFJXLvaDH1KwRj2GykIhQCIQ="></script>
+  <script src="app.js" integrity="sha256-JRygu5MeNIs1MlLTM4M5FmPWqffJLGaZVQWWhsa2Xz4="></script>
 </body>
 </html>

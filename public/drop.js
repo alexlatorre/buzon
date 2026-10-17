@@ -18,6 +18,8 @@ const dropPanel = document.getElementById('drop-panel');
 const successPanel = document.getElementById('success-panel');
 
 let targetPublicKey = null;
+// Sent with the package, so the server refuses it if the recipient rotated their keys since
+let targetKeyFingerprint = null;
 let selectedFiles = [];
 
 function showMsg(msg, type = 'info') {
@@ -42,10 +44,11 @@ async function fetchPublicKey() {
             if (expectedKeyFingerprint !== null && !verified) {
                 sysStatus.textContent = 'Error: recipient key does not match the link';
                 sysStatus.className = 'status-offline';
-                showMsg('The key provided by the server is not the one in this link. Nothing was sent. Ask the recipient for a new link.', 'error');
+                showMsg('The key provided by the server is not the one in this link, so nothing was sent. The recipient may have changed their keys: ask them for their new link. If they did not, the server may be handing out a key that is not theirs.', 'error');
                 return;
             }
             targetPublicKey = await CryptoUtils.importPublicKey(data.publicKey);
+            targetKeyFingerprint = await CryptoUtils.publicKeyFingerprint(data.publicKey);
             // Show the fingerprint in use so the sender can compare it with the one the recipient gave them
             sysStatus.textContent = verified ? `Status: Recipient key verified (${expectedKeyFingerprint}), ready to transmit` : 'Status: Ready to transmit';
             sysStatus.className = 'status-online';
@@ -161,6 +164,7 @@ btnSubmit.addEventListener('click', async () => {
         formData.append('messageIv', pkg.messageIv);
         pkg.bodies.forEach(body => formData.append('files', new Blob([body], { type: 'application/octet-stream' }), 'encrypted.bin'));
         formData.append('fileNames', JSON.stringify(pkg.names));
+        formData.append('keyFingerprint', targetKeyFingerprint);
 
         // 3. Transmit to Server
         showMsg('Transmitting secure payload to the server...', 'info');

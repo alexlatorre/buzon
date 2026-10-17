@@ -34,6 +34,7 @@ https://gallifrey.sytes.net/
 - The **strength meter** rates the password in real time.
 - **Important**: the master password is the only key to your data. If you lose it, nobody (not even the server admin) can recover your files.
 - **🔑 Change Password** in the sidebar changes it while you are logged in (you need the current one). Your keys, packages, shares and links stay the same.
+- **🔄 Rotate Keys** replaces your key pair with a new one (you need the password). It is a separate action, never done by a password change. Packages and shares keep opening, but **your drop link changes**: the links you gave out stop working on the send page, so share the new one shown afterwards. Unused one-time links can be copied again from the sidebar, or replaced with new ones from the same screen. Use it when your password or your encrypted private key may have leaked, after changing the password. What it does not fix is listed under [Threat model](#-threat-model-and-limitations).
 
 ### 2. Receiving files (Drop)
 - After login your **public link** is shown. Anyone with it can send you an encrypted package.
@@ -67,6 +68,7 @@ Everything runs in the browser with the Web Crypto API (`window.crypto.subtle`).
 | **Send (drop)** | The sender's browser fetches your public key, creates a random AES-256-GCM session key, encrypts the message, **each file and each file name** with it, and wraps the session key with RSA-OAEP under its own label. Each ciphertext is bound to its role with associated data: the message seals the sender name and a list of random file ids, each name carries its file's id, and each file body (sent as raw bytes, IV ‖ ciphertext) can only be decrypted under that id. |
 | **Receive** | Your private key unwraps the session key, which decrypts message, names and files. The inbox compares the files and sender name the server lists with the sealed ones and warns about any difference. |
 | **Share** | A random AES-256-GCM key encrypts the file; a name key derived from it (HKDF) seals the file name. The file key is wrapped with `PBKDF2(share password, random salt, 600 000)`; only the name key is also wrapped with the owner's own RSA public key (its own OAEP label), so the dashboard lists shares by name while an account takeover does not expose their contents. The link page shows neither name nor type before the password, and saves the file with a neutral type. |
+| **Rotate keys** | The browser generates a new RSA-4096 key pair, unwraps each pending package's session key and each format 2 share's owner name key with the current private key and wraps them again for the new public key, under the same OAEP label. File bodies, names and messages are not touched. The new private key is encrypted under the same password with a new salt. |
 
 The server never sees passwords, master keys, private keys, session keys, messages, file contents or (for drops) file names.
 
@@ -86,7 +88,8 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Quotas**: drops and shares share a 500 MB per-user quota.
 - **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
 - **Anti-enumeration on login**: unknown usernames get a deterministic, well-formed fake salt and the same error as a wrong password.
-- **Password change without new keys**: the browser re-encrypts the same private key under the new password (new salt, current key derivation), so packages, shares and drop links keep working. The server also requires the current password's auth hash, so a stolen session token is not enough, and every other session of the account ends. The key pair itself is not replaced: someone who knew the old password and kept a copy of the encrypted key can still decrypt with it, so after a leak, create a new account.
+- **Password change without new keys**: the browser re-encrypts the same private key under the new password (new salt, current key derivation), so packages, shares and drop links keep working. The server also requires the current password's auth hash, so a stolen session token is not enough, and every other session of the account ends. The key pair itself is not replaced: someone who knew the old password and kept a copy of the encrypted key can still decrypt with it, so after a leak, rotate the keys too.
+- **Key rotation**: a new key pair, generated in the browser, replaces the old one; only the small wrapped keys move (each pending package's session key, each format 2 share's owner name key), so the time it takes grows with the number of packages and shares, not with their size. The server requires the current password's auth hash and the answer to a challenge encrypted to the current public key under its own label, so neither a stolen session token nor the login auth hash alone can swap the key senders get. It applies everything in one transaction, only if the lists name every pending package and format 2 share (otherwise one would stop opening; the page reads them again and retries), and ends every other session; logins and password changes take the same per-user lock, so no session keeps the old keys. A key the current private key cannot open (junk sent through the drop link) is left as it is. The send page names the key it encrypted to, and the server refuses a drop that names a key the recipient no longer has, so a send page opened before the rotation cannot leave a package nobody can open.
 - **Per-account key derivation**: stored with each account and returned with the salt; the browser refuses a derivation weaker than PBKDF2-SHA256 with 600 000 iterations, so a server cannot ask for a cheap hash, and the default can be raised without locking anyone out.
 - **Login salt checked by the browser**: it must be a well-formed 16-byte value, and it is remembered per username (under a hash of it, in `localStorage`) after each successful login or registration. If the server later sends a different one, the browser asks before using the password with it. This is trust on first use: on a new browser, or after the storage is cleared (which the server itself can do with a `Clear-Site-Data` header), there is nothing to compare with, and the login screen says "first login for this account in this browser".
 - **Packages sealed as a whole** (drop format 2): the server cannot swap file bodies, names or messages between slots or packages, drop or duplicate a file, or change the sender name without the inbox showing a warning; a package relabelled to the old format does not open.
@@ -105,6 +108,16 @@ Be clear about what Shadow Drop protects against:
 - **The drop link fingerprint protects against a tampered API or database, not against a server that controls its own HTTP responses**: such a server can redirect the send page to a link carrying its own `#k`, which is the same power as serving modified pages. The send page shows the fingerprint in use, so a sender can compare it with the one the recipient gave them.
 - **Metadata is visible to the server**: who receives packages, when, how many files and their encrypted sizes, the sender name the sender typed, and for shares their size, limits and expiry. Share names are sealed with the file key (shares created before that change keep their name and type in clear).
 - **Offline guessing**: the salt and encrypted private key of a user, and the salt and wrapped key of a share, are available to an attacker who gets the database (or, for shares, the link). PBKDF2 with 600 000 iterations slows guessing down; a strong password is still the real protection.
+- **What key rotation fixes, and what it does not.** Someone with the old password and a copy of the old encrypted private key (an old backup or database dump, a past session) has the old private key; a password change alone does not stop it working. Rotation re-wraps each package's session key and each share's name key for the new key pair, but **does not change them**:
+
+  | After a rotation, the old private key… | |
+  |---|---|
+  | opens packages that arrive after the rotation | **No** |
+  | opens existing packages and shares whose old wrapped keys the attacker never copied | **No**: the server now holds only keys wrapped for the new key |
+  | opens existing packages whose old wrapped session key the attacker copied (a stolen database, a backup, a malicious server that keeps old rows), whenever they also get the files, even later | **Yes**: the session key inside is the same, and the files never change. For shares, the old owner key reveals only the name |
+  | helps someone who also knows the current password | **Yes**: rotation does not change the password, so change a leaked password first |
+
+  The defence for content that already exists is not keeping it: destroy packages once downloaded (pending packages also expire after `PACKAGE_RETENTION_DAYS`, 30 days by default) and delete shares you no longer need. Backups made with `npm run backup`, and any other copy of the database, still hold the old encrypted private key and the old wrapped keys: delete them, or keep them as carefully as the password. With MySQL, old values can also stay in the database server's own logs for a while; with SQLite the server checkpoints its write-ahead log right after the rotation.
 - **The server can move a share's sealed name to another of the same owner's shares**, so the dashboard or the link page could show one share's name for another: nothing binds the name to the token, which the server chooses. It cannot read or invent a name.
 - **A stored package can be served again**: nothing ties a package to a date or a position in the inbox, so the server can show a copy of a real package twice, or with another date. It cannot change what is inside.
 - **Registration reveals whether a username exists** (it must, to avoid duplicates). Login does not.
@@ -197,7 +210,7 @@ docker run -d -p 127.0.0.1:4000:4000 -v ./data:/app/data \
 npm test
 ```
 
-The suite (`test/`, Node's built-in test runner, no extra dependencies) starts real server instances on random ports with throw-away data directories and drives them with the same WebCrypto steps as the browser. It covers registration and login, legacy migration, fake salts, sessions and ownership checks, drops with encrypted names, one-time links and download limits under concurrency, quotas, upload limits, share expiry, security headers, the integrity endpoint and rate limiting.
+The suite (`test/`, Node's built-in test runner, no extra dependencies) starts real server instances on random ports with throw-away data directories and drives them with the same WebCrypto steps as the browser. It covers registration and login, legacy migration, fake salts, sessions and ownership checks, password change and key rotation (driving the real dashboard code), drops with encrypted names, one-time links and download limits under concurrency, quotas, upload limits, share expiry, security headers, the integrity endpoint and rate limiting.
 
 The MySQL/MariaDB driver tests are skipped unless `MYSQL_TEST_URL` points at a server where the user may create databases (they create and drop a throw-away one):
 
@@ -215,12 +228,14 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 | `GET` | `/api/auth/salt/:username` | – | Salt and key derivation (fake but stable for unknown users). |
 | `POST` | `/api/auth/login` | – | Log in with the auth hash; legacy accounts answer a challenge first. |
 | `POST` | `/api/auth/password` | ✔ | Change the password: the private key re-encrypted under the new one, plus the current password's auth hash. Ends the account's other sessions. |
+| `POST` | `/api/auth/rotate-keys/challenge` | ✔ | A nonce encrypted to the account's current public key (label `shadowdrop/rotation-challenge/v1`), for one rotation attempt. |
+| `POST` | `/api/auth/rotate-keys` | ✔ | Rotate keys: the current password's auth hash, `challengeId` and `challengeResponse` (SHA-256 of `shadowdrop/rotation-response/v1` ‖ nonce), the new public key (2048, 3072 or 4096 bits) and vault (`salt`, which must be new, `kdf`, `encryptedPrivateKey`, `iv`, `serverAuthHash`), and `packages: [{ id, encryptedSessionKey }]` and `shares: [{ token, ownerKey }]` naming every pending package and format 2 share (`null` keeps a key as it is). 403 for a wrong password, 403 with `code: "key-proof"` for a missing or wrong answer, 409 with `code: "lists-changed"` when the lists do not match, 409 without a code when the password changed meanwhile. Ends the account's other sessions. |
 | `POST` | `/api/auth/logout` | ✔ | End the session. |
 | `GET` | `/api/user/:id/public-key` | – | Public key behind a drop link. |
 | `GET` | `/api/user/:id/quota` | – | Quota and usage behind a drop link. |
 | `POST` | `/api/user/:id/config` | ✔ | Enable or disable the public link. |
 | `POST` / `GET` / `DELETE` | `/api/user/:id/one-time-link(s)` | ✔ | Manage one-time links. |
-| `POST` | `/api/drop/:id` | – | Send an encrypted package (multipart). |
+| `POST` | `/api/drop/:id` | – | Send an encrypted package (multipart). With `keyFingerprint`, refused (409) if it is not the recipient's current key. |
 | `GET` | `/api/packages/:id` | ✔ | List your packages. |
 | `GET` | `/api/package/:packageId/file/:fileId` | ✔ | Download an encrypted file you own. |
 | `DELETE` | `/api/package/:packageId` | ✔ | Destroy a package you own. |
@@ -247,6 +262,7 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 - **Pending packages expire** after `PACKAGE_RETENTION_DAYS` (30 by default); set `0` before upgrading to keep the old behaviour.
 - **Restart after changing `public/`** is no longer required for the integrity check, but run `npm run hashes` after any frontend change: the pages carry Subresource Integrity hashes, and a stale one makes the browser refuse the file.
 - **Users will see "Changes detected"** in the integrity badge after each release that changes the frontend. Tell them to compare with the [trusted hashes](#-trusted-hashes-sha-256) before accepting.
+- **Key rotation**: `POST /api/auth/rotate-keys` and **🔄 Rotate Keys** need no schema change. After a user rotates, their drop links carry a new `#k` fingerprint and the old ones fail on the send page; tell users to share the new link. The send page now sends `keyFingerprint` with each drop, and the server refuses a drop for a key the recipient no longer has (409); send pages opened before the upgrade do not send it and are not checked. A share upload whose session ended meanwhile (a rotation or password change ends the other sessions) is now refused with 401.
 - **Per-account key derivation**: accounts now store their key derivation (`users.kdf`, added on startup as `pbkdf2-sha256:600000` for existing accounts). To raise it, change `KDF_DEFAULT` in `public/crypto.js` and `DEFAULT_KDF` in `server.js` together (a test checks they match): it applies to new accounts and to each account's next password change, and existing accounts keep logging in (until they change their password, they can be told apart from unknown usernames). The browser refuses anything under 600 000 iterations.
 
 ---
@@ -276,16 +292,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `4877eb72a7ce797b40c209e93ae31f1495cbbda0c7d4ac118f61b29088500884` |
-| `crypto.js` | `8c41dc332bc9b724a808265a58871137ded7f2e9ffd65ecfae84f8ad342e66b3` |
+| `app.js` | `251ca0bb931e348b353252d33383391663d6a9f7c92c669955059686c6b65f3e` |
+| `crypto.js` | `d1812f28a693e792d1f1d8ce1651b729a17c529cb3b8ea5555808a5b186966d9` |
 | `integrity.js` | `1874d51cc1054644a2d1eb5eec3478c02ec3fb8db951230e7f4d6fed72560465` |
 | `share.js` | `162c4d9fc68d15af86b8d4f6066131c2d3e83d10d96f294518b9923bbba4cf39` |
-| `drop.js` | `0caee606e7046451a88f569b0be1d1bf95af631b3a7183356c69a78eacab5f3a` |
+| `drop.js` | `73de54def55149b7fe57b50da92a2515000d320be5663b992706cba508180291` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `8052cf80f77efc7a4ee516bcabf6a3e82800a15731c079674e9b9bbe5aa89c3f` |
+| `index.html` | `d774dc727f084cbb1ec4b93d35d66ed315834dcede6f397aafa10cca0f5cb755` |
 | `about.html` | `218c8d670db6d2792b84292c8d879c160d69028924d9336cb723b9f5eb538db1` |
-| `drop.html` | `a767f178c6a1adf91d7d75462e04e8f236cca884203e84acea888175d7d343b6` |
-| `share.html` | `b08811e8e5c11fb32db06bb1ad1b735a42834639e70e12bfa4f34e39e6553012` |
+| `drop.html` | `2c5d211ec615e62b9b8badd2ea41d6f4015f48449052728f99d0a86f3011cbb6` |
+| `share.html` | `c61a586ef49918c1b8e78f3cb54535ee654c19ac0870a76ff493233fe0c7bd60` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -306,12 +322,14 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 2. **Recibir**: comparte tu enlace público o genera enlaces de un solo uso (sirven para un único envío).
 3. **Leer**: los paquetes, sus mensajes y los nombres de los ficheros se descifran en tu navegador. **Destroy Package** los borra del servidor; los que no borres se eliminan solos a los 30 días.
 4. **Compartir ficheros**: 📤 Share File → arrastra el fichero, pon una contraseña y, si quieres, caducidad y límite de descargas. Envía el enlace y, por otro canal, la contraseña. Los enlaces caducados o agotados se borran solos cada hora.
+5. **Rotar claves**: 🔄 Rotate Keys sustituye tu par de claves por uno nuevo. Paquetes y shares se siguen abriendo, pero **tu enlace de envío cambia**: los que ya diste dejan de funcionar y hay que compartir el nuevo (los de un solo uso siguen valiendo si los copias otra vez). Úsalo si tu contraseña o tu clave privada cifrada han podido filtrarse, después de cambiar la contraseña.
 
 ## Seguridad
 - **Cifrado de extremo a extremo**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iteraciones).
 - **El servidor no ve** contraseñas, claves, mensajes, contenido de ficheros ni (en los envíos) sus nombres.
 - **Paquetes sellados** (formato 2): el servidor no puede intercambiar ficheros, nombres o mensajes, quitar o duplicar un fichero ni cambiar el nombre del remitente sin que la bandeja lo avise.
 - **Cambio de contraseña sin cambiar las claves**: el navegador vuelve a cifrar la misma clave privada; el servidor pide además la contraseña actual y cierra las demás sesiones.
+- **Rotación de claves**: el navegador genera un par nuevo y solo mueve las claves pequeñas (la de sesión de cada paquete pendiente y la del nombre de cada share de formato 2), sin tocar ficheros, nombres ni mensajes. El servidor exige la contraseña y una prueba de que tienes la clave privada actual, lo aplica todo en una transacción, solo si la lista cubre todos los paquetes y esos shares, y rechaza los envíos de la página de envío cifrados para una clave que ya no es la tuya.
 - **Derivación de clave por cuenta**: el navegador rechaza cualquiera más débil que PBKDF2 con 600 000 iteraciones.
 - **Salt del login comprobado por el navegador**: debe tener 16 bytes y se recuerda por usuario; si el servidor manda otro distinto, el navegador pregunta antes de usar la contraseña.
 - **Hash de autenticación protegido**: la base de datos guarda un hash del token de login; si se filtra, no sirve para entrar.
@@ -329,6 +347,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 - Un servidor comprometido puede servir JavaScript modificado. La verificación de integridad lo hace visible, pero no lo puede impedir.
 - El servidor ve metadatos: cuándo recibes paquetes, cuántos ficheros y su tamaño cifrado, el nombre de remitente que escribe quien envía y, en los shares, su tamaño (el nombre va sellado; solo los shares anteriores a ese cambio lo tienen en claro).
 - Quien obtenga la base de datos (o el enlace de un share) puede intentar adivinar contraseñas sin conexión; PBKDF2 lo frena, pero la defensa real es una contraseña fuerte.
+- Rotar las claves no cambia las claves de sesión: quien ya tenga la clave privada antigua y una copia anterior de las claves de sesión envueltas (base de datos robada, copia de seguridad o un servidor que guarde las filas viejas) puede leer esos paquetes en cuanto consiga sus ficheros, aunque sea después; destruye los paquetes al descargarlos (caducan a los 30 días), borra las copias de seguridad antiguas y, si la contraseña se ha filtrado, cámbiala antes de rotar.
 - El registro revela si un usuario existe; el login no.
 - Las sesiones viven en memoria: al reiniciar el servidor hay que volver a entrar.
 

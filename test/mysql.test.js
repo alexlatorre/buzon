@@ -5,7 +5,10 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const { startServer, client } = require('./helpers');
+const { loadCryptoUtils } = require('./browser-crypto');
 
+const CryptoUtils = loadCryptoUtils();
+const subtle = globalThis.crypto.subtle;
 const URL_ENV = process.env.MYSQL_TEST_URL;
 const skip = URL_ENV ? false : 'set MYSQL_TEST_URL to run the MySQL driver tests';
 
@@ -118,6 +121,38 @@ test('concurrent shares cannot go over the quota together', { skip }, async () =
     } finally {
         await q('UPDATE DB.users SET mailbox_quota = 524288000 WHERE id = ?', [alice.id]);
     }
+});
+
+test('key rotation moves every key in one transaction and refuses lists that leave one out', { skip }, async () => {
+    const { body, privateKey } = await api.rotationBody(alice, aliceToken);
+    // Alice has real packages, junk the drop link accepted (the long message), and a format 2 share
+    // whose owner key was never wrapped for her: those two go as null and stay as they are
+    assert.ok(body.packages.filter(p => p.encryptedSessionKey !== null).length >= 2, JSON.stringify(body.packages));
+    assert.ok(body.packages.some(p => p.encryptedSessionKey === null));
+    assert.equal(body.shares.length, 1);
+    const before = await q('SELECT id, encrypted_session_key FROM DB.packages WHERE user_id = ? ORDER BY id', [alice.id]);
+
+    const partial = await api.json('POST', '/api/auth/rotate-keys', { ...body, packages: body.packages.slice(1) }, aliceToken);
+    assert.equal(partial.status, 409);
+    assert.equal(partial.data.code, 'lists-changed');
+    assert.equal((await q('SELECT public_key FROM DB.users WHERE id = ?', [alice.id]))[0].public_key, alice.publicKey);
+    assert.deepEqual(await q('SELECT id, encrypted_session_key FROM DB.packages WHERE user_id = ? ORDER BY id', [alice.id]), before);
+
+    assert.equal((await api.json('POST', '/api/auth/rotate-keys', body, aliceToken)).status, 200);
+    assert.equal((await q('SELECT public_key FROM DB.users WHERE id = ?', [alice.id]))[0].public_key, body.publicKey);
+    const opens = (key, pkg) => subtle.decrypt(CryptoUtils.dropKeyParams(pkg.format), key, Buffer.from(pkg.encrypted_session_key, 'base64')).then(() => true, () => false);
+    for (const pkg of await q('SELECT id, format, encrypted_session_key FROM DB.packages WHERE user_id = ?', [alice.id])) {
+        const sent = body.packages.find(p => p.id === pkg.id);
+        if (sent.encryptedSessionKey === null) {
+            assert.equal(pkg.encrypted_session_key, before.find(p => p.id === pkg.id).encrypted_session_key);
+            continue;
+        }
+        assert.equal(pkg.encrypted_session_key, sent.encryptedSessionKey);
+        assert.equal(await opens(privateKey, pkg), true);
+        assert.equal(await opens(alice.privateKey, pkg), false);
+    }
+    alice = { ...alice, privateKey, publicKey: body.publicKey };
+    assert.equal((await api.login('alice', 'alice password')).status, 200);
 });
 
 test('housekeeping runs without database errors', { skip }, async () => {
