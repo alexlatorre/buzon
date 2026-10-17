@@ -208,6 +208,21 @@ async function handleLogin() {
     }
 }
 
+// Authenticated request: on 401 (session expired after 24 h, or the server restarted) go back to the
+// login screen and say why, instead of leaving a dashboard where nothing works
+async function authFetch(url, options = {}) {
+    const res = await fetch(url, {
+        ...options,
+        headers: { ...(options.headers || {}), 'Authorization': `Bearer ${currentUser.sessionToken}` }
+    });
+    if (res.status === 401 && currentUser.sessionToken) {
+        secureLogout();
+        showMsg('Session expired. Please log in again.', 'error');
+        throw new Error('Session expired');
+    }
+    return res;
+}
+
 function secureLogout() {
     try {
         // Call logout API
@@ -267,7 +282,7 @@ async function fetchPackages() {
 
     btnRefresh.textContent = 'Scanning...';
     try {
-        const res = await fetch(`/api/packages/${currentUser.id}`, {
+        const res = await authFetch(`/api/packages/${currentUser.id}`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
         const data = await res.json();
@@ -417,7 +432,7 @@ async function destroyPackage() {
 
     btnDestroy.textContent = 'Destroying...';
     try {
-        const res = await fetch(`/api/package/${selectedPackage.id}`, {
+        const res = await authFetch(`/api/package/${selectedPackage.id}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
@@ -436,7 +451,7 @@ async function destroyPackage() {
 async function updateQuotaDisplay() {
     if (!currentUser) return;
     try {
-        const res = await fetch(`/api/user/${currentUser.id}/config`, {
+        const res = await authFetch(`/api/user/${currentUser.id}/config`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
         const data = await res.json();
@@ -474,7 +489,7 @@ async function downloadFile(f) {
     if (!selectedPackage || !currentPackageSessionKey) return;
 
     try {
-        const res = await fetch(`/api/package/${selectedPackage.id}/file/${f.id}`, {
+        const res = await authFetch(`/api/package/${selectedPackage.id}/file/${f.id}`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
         if (!res.ok) throw new Error('Download failed');
@@ -492,9 +507,11 @@ async function downloadFile(f) {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
+        return true;
     } catch (e) {
         console.error(e);
-        alert(`Failed to decrypt file: ${f.displayName}`);
+        if (currentUser.sessionToken) alert(`Failed to decrypt file: ${f.displayName}`);
+        return false;
     }
 }
 
@@ -509,15 +526,18 @@ async function downloadFiles() {
 
     btnDownloadAll.textContent = 'Decrypting...';
     // Download each file, decrypt it and trigger download in browser
+    let failed = 0;
     for (let i = 0; i < selectedPackage.files.length; i++) {
-        await downloadFile(selectedPackage.files[i]);
+        if (!(await downloadFile(selectedPackage.files[i]))) failed++;
     }
 
     btnDownloadAll.textContent = 'Decrypt & Download All';
 
-    // Auto destroy after successful download
-    if (confirm("Files downloaded. Do you want to destroy the package from the server now?")) {
+    // Offer to destroy only when every file made it to the user's disk
+    if (failed === 0 && confirm("Files downloaded. Do you want to destroy the package from the server now?")) {
         destroyPackage();
+    } else if (failed > 0 && currentUser.sessionToken) {
+        alert(`${failed} file(s) could not be downloaded. The package was kept on the server.`);
     }
 }
 
@@ -608,7 +628,7 @@ togglePublicLink.addEventListener('change', async () => {
     if (!currentUser) return;
     try {
         const enabled = togglePublicLink.checked;
-        const res = await fetch(`/api/user/${currentUser.id}/config`, {
+        const res = await authFetch(`/api/user/${currentUser.id}/config`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -627,7 +647,7 @@ togglePublicLink.addEventListener('change', async () => {
 btnGenOTL.addEventListener('click', async () => {
     if (!currentUser) return;
     try {
-        const res = await fetch(`/api/user/${currentUser.id}/one-time-link`, {
+        const res = await authFetch(`/api/user/${currentUser.id}/one-time-link`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
@@ -646,7 +666,7 @@ const shareListUI = document.getElementById('share-list');
 async function fetchShares() {
     if (!currentUser || !currentUser.id) return;
     try {
-        const res = await fetch(`/api/shares/${currentUser.id}`, {
+        const res = await authFetch(`/api/shares/${currentUser.id}`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
         if (res.ok) renderShares(await res.json());
@@ -701,7 +721,7 @@ function renderShares(shares) {
         deleteBtn.onclick = async () => {
             if (!confirm('Delete this share? The link will stop working.')) return;
             try {
-                const res = await fetch(`/api/share/${s.token}`, {
+                const res = await authFetch(`/api/share/${s.token}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
                 });
@@ -723,7 +743,7 @@ function renderShares(shares) {
 async function fetchOneTimeLinks() {
     if (!currentUser) return;
     try {
-        const res = await fetch(`/api/user/${currentUser.id}/one-time-links`, {
+        const res = await authFetch(`/api/user/${currentUser.id}/one-time-links`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
         const links = await res.json();
@@ -769,7 +789,7 @@ function renderOneTimeLinks(links) {
             e.stopPropagation();
             if (confirm("Delete this one-time link?")) {
                 try {
-                    const res = await fetch(`/api/user/${currentUser.id}/one-time-link/${l.token}`, {
+                    const res = await authFetch(`/api/user/${currentUser.id}/one-time-link/${l.token}`, {
                         method: 'DELETE',
                         headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
                     });
@@ -993,7 +1013,7 @@ async function handleShareUpload() {
             formData.append('messageIv', messageIv);
         }
 
-        const res = await fetch(`/api/share/${currentUser.id}`, {
+        const res = await authFetch(`/api/share/${currentUser.id}`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` },
             body: formData

@@ -124,7 +124,7 @@ test('the dashboard lists shares with a delete button, as text', () => {
     const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
     assert.match(html, /id="share-list"/);
     const render = app.slice(app.indexOf('function renderShares('), app.indexOf('function renderShares(') + 3000);
-    assert.match(app, /fetch\(`\/api\/shares\/\$\{currentUser\.id\}`/);
+    assert.match(app, /authFetch\(`\/api\/shares\/\$\{currentUser\.id\}`/);
     assert.match(render, /\.textContent = s\.original_name/);
     assert.match(render, /method: 'DELETE'/);
     assert.doesNotMatch(render, /innerHTML\s*=\s*`[^`]*\$\{/);

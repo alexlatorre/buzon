@@ -165,7 +165,7 @@ test('the dashboard sends the key the server reads and reads its own config', ()
     const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
     assert.match(app, /JSON\.stringify\(\{ publicLinkEnabled: enabled \}\)/);
     const quota = app.slice(app.indexOf('async function updateQuotaDisplay('), app.indexOf('async function downloadFile('));
-    assert.match(quota, /fetch\(`\/api\/user\/\$\{currentUser\.id\}\/config`/);
+    assert.match(quota, /authFetch\(`\/api\/user\/\$\{currentUser\.id\}\/config`/);
     assert.match(quota, /Authorization/);
 });
 
