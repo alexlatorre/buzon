@@ -380,8 +380,17 @@ async function openPackage(id) {
         modal.classList.remove('hidden');
 
     } catch (error) {
+        // Corrupted, or junk sent through the drop link: still open the modal so it can be destroyed,
+        // otherwise it would sit in the inbox and count against the quota for good
         console.error(error);
-        alert('Error: Failed to decrypt package. Invalid key or corrupted data.');
+        currentPackageSessionKey = null;
+        document.getElementById('modal-sender').textContent = pkg.sender_name || 'Anonymous';
+        document.getElementById('modal-date').textContent = formatDateTime(parseServerDate(pkg.created_at), true);
+        document.getElementById('modal-message').textContent =
+            'This package could not be decrypted with your key (corrupted or not meant for you). You can destroy it.';
+        document.getElementById('modal-files').replaceChildren();
+        btnDownloadAll.style.display = 'none';
+        modal.classList.remove('hidden');
     }
 }
 
