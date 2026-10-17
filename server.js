@@ -181,7 +181,13 @@ app.use(express.json({ limit: '5mb' }));
 // Rate limiting
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT) || 20, message: { error: 'Too many attempts, try again later' } });
 const dropLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: { error: 'Too many uploads, try again later' } });
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Too many requests, try again later' } });
+// Login has its own limiter: ordinary dashboard traffic must not lock an IP out of signing in
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: Number(process.env.API_RATE_LIMIT) || 200,
+    skip: req => req.path.startsWith('/auth/'),
+    message: { error: 'Too many requests, try again later' }
+});
 app.use('/api/auth/', authLimiter);
 app.use('/api/drop/', dropLimiter);
 app.use('/api/', apiLimiter);

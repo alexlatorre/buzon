@@ -56,3 +56,15 @@ test('README trusted hashes match the files being served', async () => {
     const { files } = await (await fetch(`${server.base}/api/integrity`)).json();
     assert.deepEqual(documented, files);
 });
+
+test('using the API does not use up the login allowance', async () => {
+    const limited = await startServer({ API_RATE_LIMIT: '3', AUTH_RATE_LIMIT: '100' });
+    try {
+        const statuses = [];
+        for (let i = 0; i < 4; i++) statuses.push((await fetch(`${limited.base}/api/integrity`)).status);
+        assert.deepEqual(statuses, [200, 200, 200, 429]);
+        assert.equal((await fetch(`${limited.base}/api/auth/salt/someone`)).status, 200);
+    } finally {
+        await limited.stop();
+    }
+});
