@@ -18,9 +18,7 @@ function probe(lib, options) {
 }
 
 (async () => {
-    // With TLS on but no certificates mounted the server speaks HTTP, so try both
-    const ok = useTls
-        ? (await probe(https, { rejectUnauthorized: false })) || (await probe(http, {}))
-        : await probe(http, {});
+    // Without TLS=off the server only ever speaks HTTPS (it refuses to start without certificates)
+    const ok = useTls ? await probe(https, { rejectUnauthorized: false }) : await probe(http, {});
     process.exit(ok ? 0 : 1);
 })();

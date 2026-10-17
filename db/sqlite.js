@@ -3,11 +3,22 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const fs = require('fs');
+const { dataLeftovers, lostDatabaseMessage } = require('./leftovers');
 
 const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 fs.mkdirSync(dataDir, { recursive: true });
 const dbPath = path.join(dataDir, 'buzon.db');
+// A new database is normal on a first install, not next to the files of an earlier one
+const isNewDatabase = !fs.existsSync(dbPath);
+if (isNewDatabase) {
+    const found = dataLeftovers(dataDir);
+    if (found.length) {
+        console.error(lostDatabaseMessage(dbPath, dataDir, found));
+        process.exit(1);
+    }
+}
 const db = new Database(dbPath);
+if (isNewDatabase) console.log(`[DB] Created a new, empty database at ${dbPath}`);
 
 db.pragma('journal_mode = WAL');
 // Explicit, rather than relying on how better-sqlite3 was compiled

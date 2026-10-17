@@ -152,7 +152,7 @@ All settings are environment variables; nothing secret lives in the repository.
 | `MYSQL_HOST` / `MYSQL_PORT` | `localhost` / `3306` | MySQL server. |
 | `MYSQL_USER` / `MYSQL_PASSWORD` | `root` / *(empty)* | MySQL credentials. Use a dedicated user. |
 | `MYSQL_DATABASE` | `buzon` | MySQL database name. |
-| `TLS` | *(on)* | `off` forces plain HTTP even if certificates exist (TLS terminated by a proxy). |
+| `TLS` | *(on)* | `off` serves plain HTTP (TLS terminated by a proxy), even if certificates exist. Without it, the server needs usable certificates and refuses to start otherwise. |
 | `TRUST_PROXY` | `1` with `TLS=off`, otherwise `false` | Express `trust proxy` setting: the number of proxies in front of the app, or `false`. Only set it when a proxy really sits in front, otherwise clients can forge `X-Forwarded-For` and bypass rate limits. `true` is refused at startup. |
 | `LEGACY_MIGRATION` | closed | `open` lets accounts created before the login hash existed migrate on their next login. While open, anyone who knows such a username can fetch its encrypted private key and guess the password offline, so open it only as long as needed. |
 | `AUTH_RATE_LIMIT` | `20` | Auth requests per IP every 15 minutes. |
@@ -162,7 +162,7 @@ All settings are environment variables; nothing secret lives in the repository.
 | `ORPHAN_GRACE_MS` | `3600000` (1 h) | Age after which upload files with no database row are deleted by the hourly cleanup. |
 
 ### TLS certificates
-The server looks for, in order: `certs/fullchain.pem` + `certs/privkey.pem`, `fullchain.pem` + `privkey.pem`, `cert.pem` + `key.pem`. If none are found (or `TLS=off`) it serves HTTP, which is the right setup behind a reverse proxy that handles TLS. If certificates are found but cannot be used (unreadable key, bad PEM, mismatched pair) the server refuses to start instead of falling back to HTTP. Certificates and keys are git-ignored.
+The server looks for, in order: `certs/fullchain.pem` + `certs/privkey.pem`, `fullchain.pem` + `privkey.pem`, `cert.pem` + `key.pem`. It serves plain HTTP only with `TLS=off`, which is the right setup behind a reverse proxy that handles TLS. Without `TLS=off`, it refuses to start if it finds no certificates, or finds them but cannot use them (unreadable key, bad PEM, mismatched pair), instead of serving cleartext on the port you believe is HTTPS. Certificates and keys are git-ignored.
 
 ---
 
@@ -173,6 +173,8 @@ With SQLite everything lives in `DATA_DIR`: the database, `drop/`, `shares/` and
 ```bash
 npm run backup -- /path/to/empty/folder
 ```
+
+A missing database is created on first start (the log says so). If `buzon.db` is missing but `DATA_DIR` still holds files from an earlier install (`.salt_secret`, `buzon.db-wal`, uploads), the server refuses to start instead of opening an empty database: restore the database, or move those files away to really start from scratch. With MySQL the database itself must exist; the server creates its tables, logs it, and refuses in the same situation.
 
 The script uses SQLite's online backup API, so it is consistent while the server runs, and copies the upload folders and `.salt_secret`. Restore by putting the folder back as `DATA_DIR`. Keep `.salt_secret` with the database: if it is lost, the server generates a new one and logs a warning, and fake salts for unknown usernames change (which lets someone comparing them over time tell real accounts apart).
 
@@ -259,6 +261,8 @@ MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 - **Share format 2**: new shares are stored with `format = 2` and an `owner_key` (columns added on startup); their name is sealed and no type is stored. `GET /api/share/:token/meta` no longer returns `createdAt`, `downloadCount` or `maxDownloads` (it returns `downloadsLeft`), nor `mimeType` for format 2. Shares created before keep working.
 - **Shares**: new shares need a download proof derived from the password, so link holders cannot use up downloads; shares created before keep working without it. Share passwords now need 12 characters.
 - **Drop format 2**: new drops are stored with `format = 2` (a column added on startup). Packages sent before still open; their names and files use the previous format. File bodies are now raw bytes, 28 bytes larger than the file. The 256 KB message limit now also covers the sealed file list and sender name. Do not roll back to a version before format 2 while it receives drops: an older server accepts them but stores them as format 1, and they will not open.
+- **No certificates means no start**: without `TLS=off`, the server no longer falls back to plain HTTP when it finds no certificates. Behind a TLS-terminating proxy, set `TLS=off` (with `TRUST_PROXY`).
+- **Lost database guard**: a missing database next to files of an earlier install stops the server (see [Backups](#-backups)).
 - **Pending packages expire** after `PACKAGE_RETENTION_DAYS` (30 by default); set `0` before upgrading to keep the old behaviour.
 - **Restart after changing `public/`** is no longer required for the integrity check, but run `npm run hashes` after any frontend change: the pages carry Subresource Integrity hashes, and a stale one makes the browser refuse the file.
 - **Users will see "Changes detected"** in the integrity badge after each release that changes the frontend. Tell them to compare with the [trusted hashes](#-trusted-hashes-sha-256) before accepting.
@@ -358,7 +362,7 @@ npm start      # http://localhost:4000
 npm test       # batería de pruebas automáticas
 ```
 
-Se configura con variables de entorno (tabla completa en [Configuration](#-configuration)): `PORT`, `DATA_DIR`, `DB_ENGINE`, `MYSQL_*`, `TLS=off` para servir HTTP detrás de un proxy, `TRUST_PROXY` (número de proxies delante; por defecto `false`, o `1` con `TLS=off`) y `AUTH_RATE_LIMIT`.
+Se configura con variables de entorno (tabla completa en [Configuration](#-configuration)): `PORT`, `DATA_DIR`, `DB_ENGINE`, `MYSQL_*`, `TLS=off` para servir HTTP detrás de un proxy (sin él y sin certificados, el servidor no arranca), `TRUST_PROXY` (número de proxies delante; por defecto `false`, o `1` con `TLS=off`) y `AUTH_RATE_LIMIT`.
 
 ## Docker
 ```bash

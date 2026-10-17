@@ -192,6 +192,13 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 // TLS=off forces plain HTTP (TLS terminated by a reverse proxy, or tests)
 const sslCerts = process.env.TLS === 'off' ? null : findSSLCerts();
+// Plain HTTP only when asked for: without certificates and without TLS=off the server would serve
+// cleartext on the port the operator believes is HTTPS (e.g. a certificate volume not mounted)
+if (process.env.TLS !== 'off' && !sslCerts) {
+    console.error('No TLS certificates found (looked for certs/fullchain.pem + certs/privkey.pem, fullchain.pem + privkey.pem, cert.pem + key.pem).');
+    console.error('Mount them, or set TLS=off to serve plain HTTP behind a TLS-terminating proxy.');
+    process.exit(1);
+}
 
 // X-Forwarded-For decides the client IP the rate limiters see, so it is only trusted when the
 // operator says a proxy is in front: TRUST_PROXY, or TLS=off (the documented "TLS terminated by a
@@ -1494,7 +1501,7 @@ db.ready.then(() => {
             process.exit(1);
         }
     } else {
-        // Fallback to HTTP for dev or if running behind a proxy
+        // TLS=off: plain HTTP behind a TLS-terminating proxy, or for development
         httpServer = http.createServer(serverOptions, app).listen(PORT, () => {
             console.log(`Buzon HTTP server running at http://localhost:${PORT}`);
         });

@@ -32,7 +32,8 @@ VOLUME ["/app/data"]
 #   -v /path/to/fullchain.pem:/app/certs/fullchain.pem
 #   -v /path/to/privkey.pem:/app/certs/privkey.pem
 # The container runs as uid 1000 (node): privkey.pem must be readable by that user.
-# Unreadable or invalid certs stop the server; if none are mounted it starts in HTTP mode.
+# Unreadable or invalid certs stop the server, and so does having none: behind a TLS-terminating
+# proxy, run with -e TLS=off.
 VOLUME ["/app/certs"]
 
 USER node

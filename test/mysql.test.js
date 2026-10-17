@@ -4,7 +4,10 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
-const { startServer, client } = require('./helpers');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { startServer, startServerCopy, client } = require('./helpers');
 const { loadCryptoUtils } = require('./browser-crypto');
 
 const CryptoUtils = loadCryptoUtils();
@@ -99,6 +102,33 @@ test('format 2 shares keep their sealed name and owner key', { skip }, async () 
     const meta = (await api.json('GET', `/api/share/${created.data.token}/meta`)).data;
     assert.equal(meta.format, 2);
     assert.equal('mimeType' in meta, false);
+});
+
+test('an empty database next to files of an earlier install stops the server', { skip }, async () => {
+    const url = new URL(URL_ENV);
+    const emptyDb = `${dbName}_empty`;
+    await admin.query(`CREATE DATABASE ${emptyDb}`);
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'buzon-mysql-left-'));
+    fs.writeFileSync(path.join(dataDir, '.salt_secret'), 'x');
+    const env = {
+        TLS: 'off', DB_ENGINE: 'mysql', MYSQL_HOST: url.hostname, MYSQL_PORT: url.port || '3306',
+        MYSQL_USER: decodeURIComponent(url.username), MYSQL_PASSWORD: decodeURIComponent(url.password), MYSQL_DATABASE: emptyDb, DATA_DIR: dataDir
+    };
+    try {
+        const refused = await startServerCopy(env);
+        await refused.stop();
+        assert.equal(refused.started, false);
+        assert.match(refused.output(), /from an earlier install/);
+        // Without the leftovers it is a first install: tables created, and said so
+        fs.rmSync(path.join(dataDir, '.salt_secret'));
+        const fresh = await startServerCopy(env);
+        await fresh.stop();
+        assert.equal(fresh.started, true, fresh.output());
+        assert.match(fresh.output(), /Created the tables in MySQL database/);
+    } finally {
+        await admin.query(`DROP DATABASE IF EXISTS ${emptyDb}`);
+        fs.rmSync(dataDir, { recursive: true, force: true });
+    }
 });
 
 test('one-time links work once', { skip }, async () => {

@@ -4,6 +4,7 @@
 const { v4: uuidv4 } = require('uuid');
 const mysql = require('mysql2/promise'); // a hard dependency: without it the server must not start
 const config = require('../config').db.mysql;
+const { dataLeftovers, lostDatabaseMessage } = require('./leftovers');
 
 // Everything in UTC: JS Dates are sent and read as UTC, and the session clock (CURRENT_TIMESTAMP,
 // UTC_TIMESTAMP) agrees with it whatever the server's own time zone is
@@ -24,9 +25,22 @@ pool.pool.on('connection', connection => connection.query("SET time_zone = '+00:
 const orNull = value => (value === undefined ? null : value);
 
 // Tables, migrations and indexes; server.js waits for this before accepting requests
+// Read before server.js writes anything into the data directory (it creates .salt_secret on startup)
+const dataDir = process.env.DATA_DIR || require('path').join(__dirname, '..', 'data');
+const leftoversAtStart = dataLeftovers(dataDir);
+
 const ready = (async () => {
     const conn = await pool.getConnection();
     try {
+        // No users table: a new database, which is normal on a first install, not next to the files
+        // of an earlier one (a wrong MYSQL_DATABASE, or a database that was lost)
+        const [usersTable] = await conn.query(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'"
+        );
+        const isNewDatabase = usersTable.length === 0;
+        if (isNewDatabase && leftoversAtStart.length) {
+            throw new Error(lostDatabaseMessage(`MySQL database ${config.database}`, dataDir, leftoversAtStart));
+        }
         await conn.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id VARCHAR(36) PRIMARY KEY,
@@ -154,7 +168,9 @@ const ready = (async () => {
         for (const col of textCols) {
             await conn.query(`ALTER TABLE ${col.TABLE_NAME} MODIFY encrypted_message MEDIUMTEXT`);
         }
-        console.log("MySQL tables synchronized.");
+        console.log(isNewDatabase
+            ? `[DB] Created the tables in MySQL database ${config.database}, which had none`
+            : "MySQL tables synchronized.");
     } finally {
         conn.release();
     }
