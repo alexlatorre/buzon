@@ -181,23 +181,10 @@ function parseTrustProxy(value) {
 }
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
-app.use(express.json({ limit: '5mb' }));
-
-// Rate limiting
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT) || 20, message: { error: 'Too many attempts, try again later' } });
-const dropLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: { error: 'Too many uploads, try again later' } });
-// Login has its own limiter: ordinary dashboard traffic must not lock an IP out of signing in
-const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: Number(process.env.API_RATE_LIMIT) || 200,
-    skip: req => req.path.startsWith('/auth/'),
-    message: { error: 'Too many requests, try again later' }
-});
-app.use('/api/auth/', authLimiter);
-app.use('/api/drop/', dropLimiter);
-app.use('/api/', apiLimiter);
+app.disable('x-powered-by');
 
 // --- Security Headers (CSP + hardening) ---
+// First middleware of all, so 429s, body-parser errors and 404s carry them too
 app.use((req, res, next) => {
     // Strict Content Security Policy — blocks all inline scripts and external sources
     res.setHeader('Content-Security-Policy', [
@@ -221,6 +208,11 @@ app.use((req, res, next) => {
     // Prevent MIME type sniffing
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
+    // Cross-origin isolation: no other origin may open us in a window it controls or embed our resources
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+
     // Clickjacking protection
     res.setHeader('X-Frame-Options', 'DENY');
 
@@ -236,6 +228,28 @@ app.use((req, res, next) => {
 
     next();
 });
+
+app.use(express.json({ limit: '5mb' }));
+// Express 5 leaves req.body undefined without a JSON body; handlers then answer 400 instead of crashing
+app.use((req, res, next) => {
+    if (req.body === undefined) req.body = {};
+    next();
+});
+
+// Rate limiting
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: Number(process.env.AUTH_RATE_LIMIT) || 20, message: { error: 'Too many attempts, try again later' } });
+const dropLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: { error: 'Too many uploads, try again later' } });
+// Login has its own limiter: ordinary dashboard traffic must not lock an IP out of signing in
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: Number(process.env.API_RATE_LIMIT) || 200,
+    skip: req => req.path.startsWith('/auth/'),
+    message: { error: 'Too many requests, try again later' }
+});
+app.use('/api/auth/', authLimiter);
+app.use('/api/drop/', dropLimiter);
+app.use('/api/', apiLimiter);
+
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -1123,12 +1137,23 @@ setTimeout(housekeeping, Number(process.env.HOUSEKEEPING_DELAY_MS) || 10 * 1000)
 setInterval(housekeeping, 60 * 60 * 1000);
 
 // Upload limit errors (too many files, too large...) as JSON instead of an HTML error page
+app.use((req, res) => {
+    res.status(404).json({ error: 'Not found' });
+});
+
 app.use((err, req, res, next) => {
     if (err instanceof multer.MulterError) {
         const status = err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT' ? 413 : 400;
         return res.status(status).json({ error: `Upload rejected: ${err.message}` });
     }
-    console.error('Unhandled error:', err);
+    // body-parser and multipart errors (malformed JSON, too large, broken multipart): the client's fault.
+    // Log the message only, never err.body, which holds what the client sent (auth hashes included).
+    const status = err.status || err.statusCode;
+    if (status >= 400 && status < 500) {
+        console.warn(`Rejected request body (${status}): ${err.type || err.message}`);
+        return res.status(status).json({ error: 'Invalid request body' });
+    }
+    console.error('Unhandled error:', err.message);
     res.status(500).json({ error: 'Server error' });
 });
 

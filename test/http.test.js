@@ -68,3 +68,45 @@ test('using the API does not use up the login allowance', async () => {
         await limited.stop();
     }
 });
+
+test('every response carries the security headers, errors and 429s included', async () => {
+    const limited = await startServer({ AUTH_RATE_LIMIT: '1' });
+    try {
+        await fetch(`${limited.base}/api/auth/salt/a`);
+        const tooMany = await fetch(`${limited.base}/api/auth/salt/a`);
+        const badJson = await fetch(`${limited.base}/api/user/x/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"broken' });
+        const notFound = await fetch(`${limited.base}/nope`);
+        for (const [label, res] of Object.entries({ tooMany, badJson, notFound })) {
+            assert.match(res.headers.get('content-security-policy') || '', /default-src 'self'/, label);
+            assert.equal(res.headers.get('x-content-type-options'), 'nosniff', label);
+            assert.equal(res.headers.get('x-powered-by'), null, label);
+        }
+        assert.equal(tooMany.status, 429);
+    } finally {
+        await limited.stop();
+    }
+});
+
+test('cross-origin isolation headers are set', async () => {
+    const res = await fetch(`${server.base}/`);
+    assert.equal(res.headers.get('cross-origin-opener-policy'), 'same-origin');
+    assert.equal(res.headers.get('cross-origin-resource-policy'), 'same-origin');
+    assert.equal(res.headers.get('x-permitted-cross-domain-policies'), 'none');
+    assert.equal(res.headers.get('x-powered-by'), null);
+});
+
+test('malformed or missing JSON bodies get 400 as JSON, not 500', async () => {
+    const own = await startServer();
+    try {
+        const malformed = await fetch(`${own.base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"username": ' });
+        assert.equal(malformed.status, 400);
+        assert.ok((await malformed.json()).error);
+        assert.doesNotMatch(own.logs(), /"username": /, 'the raw body must not be logged');
+        const noBody = await fetch(`${own.base}/api/auth/login`, { method: 'POST' });
+        assert.equal(noBody.status, 400);
+        const register = await fetch(`${own.base}/api/auth/register`, { method: 'POST' });
+        assert.equal(register.status, 400);
+    } finally {
+        await own.stop();
+    }
+});
