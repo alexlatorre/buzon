@@ -265,6 +265,15 @@ module.exports = {
         return rows.map(r => `${r.package_id}_${r.id}`);
     },
 
+    getAllPackageFiles: async () => {
+        const [rows] = await pool.execute('SELECT pf.id, pf.package_id, p.created_at FROM package_files pf JOIN packages p ON pf.package_id = p.id');
+        return rows;
+    },
+
+    deletePackageFile: async (id) => {
+        await pool.execute('DELETE FROM package_files WHERE id = ?', [id]);
+    },
+
     getAllShareLimits: async () => {
         const [rows] = await pool.execute('SELECT token, max_downloads, download_count, expires_at FROM shares');
         return rows;

@@ -998,6 +998,14 @@ const UUID_PART = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const DROP_FILE_NAME = new RegExp(`^(${UUID_PART}_${UUID_PART}|${UUID_PART}\\.upload)$`);
 const SHARE_FILE_NAME = new RegExp(`^(${UUID_PART})\\.enc$`);
 
+// SQLite returns CURRENT_TIMESTAMP as "YYYY-MM-DD HH:MM:SS" in UTC with no zone; MySQL gives a Date
+function storedDate(value) {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
+        return new Date(value.replace(' ', 'T') + 'Z').getTime();
+    }
+    return new Date(value).getTime();
+}
+
 async function sweepOrphanFiles() {
     try {
         const cutoff = Date.now() - ORPHAN_GRACE_MS;
@@ -1008,6 +1016,17 @@ async function sweepOrphanFiles() {
         for (const name of fs.readdirSync(DROP_DIR)) {
             const file = path.join(DROP_DIR, name);
             if (DROP_FILE_NAME.test(name) && !liveDropFiles.has(name) && isOld(file)) remove(file);
+        }
+
+        // The other way round: rows whose file is gone (restore mistake, manual delete) would count
+        // against the quota forever and only fail on download. Old enough rows only, so a file
+        // still being moved into place is never affected.
+        for (const row of await db.getAllPackageFiles()) {
+            const file = path.join(DROP_DIR, `${row.package_id}_${row.id}`);
+            if (storedDate(row.created_at) < cutoff && !fs.existsSync(file)) {
+                console.error('Removing file row with no file on disk:', row.id);
+                await db.deletePackageFile(row.id);
+            }
         }
 
         const liveShares = new Set((await db.getAllShareLimits()).map(s => s.token));

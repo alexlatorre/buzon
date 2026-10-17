@@ -220,6 +220,14 @@ module.exports = {
         return db.prepare('SELECT package_id, id FROM package_files').all().map(r => `${r.package_id}_${r.id}`);
     },
 
+    getAllPackageFiles: async () => {
+        return db.prepare('SELECT pf.id, pf.package_id, p.created_at FROM package_files pf JOIN packages p ON pf.package_id = p.id').all();
+    },
+
+    deletePackageFile: async (id) => {
+        db.prepare('DELETE FROM package_files WHERE id = ?').run(id);
+    },
+
     getAllShareLimits: async () => {
         return db.prepare('SELECT token, max_downloads, download_count, expires_at FROM shares').all();
     },

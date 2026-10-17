@@ -5,10 +5,11 @@ const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const Database = require('better-sqlite3');
 const { startServer, client } = require('./helpers');
 
 const HOUSEKEEPING_DELAY_MS = 4000;
-let server, api, alice, planted, live;
+let server, api, alice, planted, live, lost, usageBefore;
 
 const hoursAgo = h => (Date.now() - h * 3600000) / 1000;
 function plant(dir, name, ageHours) {
@@ -46,6 +47,16 @@ before(async () => {
     };
     for (const file of Object.values(live)) fs.utimesSync(file, hoursAgo(3), hoursAgo(3));
 
+    // An old package whose file has vanished from disk (restore mistake, manual delete)
+    const lostDrop = (await api.drop(alice.id, alice.publicKey, [{ name: 'gone.txt', content: 'x'.repeat(5000) }])).data;
+    const lostPkg = (await api.json('GET', `/api/packages/${alice.id}`, null, alice.token)).data.find(p => p.id === lostDrop.packageId);
+    lost = { packageId: lostPkg.id, fileId: lostPkg.files[0].id, size: lostPkg.files[0].size };
+    fs.unlinkSync(path.join(drop, `${lost.packageId}_${lost.fileId}`));
+    const db = new Database(path.join(server.dataDir, 'buzon.db'));
+    db.prepare("UPDATE packages SET created_at = datetime('now', '-3 hours') WHERE id = ?").run(lost.packageId);
+    db.close();
+    usageBefore = (await api.json('GET', `/api/user/${alice.id}/config`, null, alice.token)).data.usage;
+
     // Let the first housekeeping run happen
     await new Promise(r => setTimeout(r, HOUSEKEEPING_DELAY_MS + 1500));
 });
@@ -72,4 +83,12 @@ test('files with a DB row are kept, however old', () => {
 
 test('files that do not follow the storage naming are left alone', () => {
     assert.equal(fs.existsSync(planted.unrelated), true);
+});
+
+test('file rows whose file is gone stop counting against the quota', async () => {
+    const pkg = (await api.json('GET', `/api/packages/${alice.id}`, null, alice.token)).data.find(p => p.id === lost.packageId);
+    assert.ok(pkg, 'the package itself stays, with its message');
+    assert.equal(pkg.files.some(f => f.id === lost.fileId), false);
+    const usage = (await api.json('GET', `/api/user/${alice.id}/config`, null, alice.token)).data.usage;
+    assert.equal(usageBefore - usage, lost.size);
 });
