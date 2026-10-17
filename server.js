@@ -947,8 +947,43 @@ async function purgeDeadShares() {
         console.error('Share cleanup error:', error);
     }
 }
-setTimeout(purgeDeadShares, 10 * 1000);
-setInterval(purgeDeadShares, 60 * 60 * 1000);
+// Files no DB row points to: temp files of aborted uploads, files left by a failed insert or a crash.
+// Only names the server itself creates are touched, and only once they are older than the grace
+// period, so uploads still in progress are never removed.
+const ORPHAN_GRACE_MS = Number(process.env.ORPHAN_GRACE_MS) || 60 * 60 * 1000;
+const UUID_PART = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const DROP_FILE_NAME = new RegExp(`^(${UUID_PART}_${UUID_PART}|${UUID_PART}\\.upload)$`);
+const SHARE_FILE_NAME = new RegExp(`^(${UUID_PART})\\.enc$`);
+
+async function sweepOrphanFiles() {
+    try {
+        const cutoff = Date.now() - ORPHAN_GRACE_MS;
+        const isOld = file => { try { return fs.statSync(file).mtimeMs < cutoff; } catch { return false; } };
+        const remove = file => { try { fs.unlinkSync(file); } catch (error) { console.error('Orphan cleanup failed:', file, error.message); } };
+
+        const liveDropFiles = new Set(await db.getAllPackageFileKeys());
+        for (const name of fs.readdirSync(DROP_DIR)) {
+            const file = path.join(DROP_DIR, name);
+            if (DROP_FILE_NAME.test(name) && !liveDropFiles.has(name) && isOld(file)) remove(file);
+        }
+
+        const liveShares = new Set((await db.getAllShareLimits()).map(s => s.token));
+        for (const name of fs.readdirSync(SHARE_DIR)) {
+            const match = SHARE_FILE_NAME.exec(name);
+            const file = path.join(SHARE_DIR, name);
+            if (match && !liveShares.has(match[1]) && isOld(file)) remove(file);
+        }
+    } catch (error) {
+        console.error('Orphan sweep error:', error);
+    }
+}
+
+async function housekeeping() {
+    await purgeDeadShares();
+    await sweepOrphanFiles();
+}
+setTimeout(housekeeping, Number(process.env.HOUSEKEEPING_DELAY_MS) || 10 * 1000);
+setInterval(housekeeping, 60 * 60 * 1000);
 
 // Upload limit errors (too many files, too large...) as JSON instead of an HTML error page
 app.use((err, req, res, next) => {

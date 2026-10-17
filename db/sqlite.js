@@ -215,6 +215,11 @@ module.exports = {
         return db.prepare('UPDATE shares SET download_count = download_count + 1 WHERE token = ? AND (max_downloads = 0 OR download_count < max_downloads)').run(token).changes > 0;
     },
 
+    // "<packageId>_<fileId>", the on-disk name of every stored drop file
+    getAllPackageFileKeys: async () => {
+        return db.prepare('SELECT package_id, id FROM package_files').all().map(r => `${r.package_id}_${r.id}`);
+    },
+
     getAllShareLimits: async () => {
         return db.prepare('SELECT token, max_downloads, download_count, expires_at FROM shares').all();
     },

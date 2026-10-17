@@ -259,6 +259,12 @@ module.exports = {
         return result.affectedRows > 0;
     },
 
+    // "<packageId>_<fileId>", the on-disk name of every stored drop file
+    getAllPackageFileKeys: async () => {
+        const [rows] = await pool.execute('SELECT package_id, id FROM package_files');
+        return rows.map(r => `${r.package_id}_${r.id}`);
+    },
+
     getAllShareLimits: async () => {
         const [rows] = await pool.execute('SELECT token, max_downloads, download_count, expires_at FROM shares');
         return rows;
