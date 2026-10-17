@@ -85,6 +85,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Quotas**: drops and shares share a 500 MB per-user quota.
 - **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
 - **Anti-enumeration on login**: unknown usernames get a deterministic, well-formed fake salt and the same error as a wrong password.
+- **Subresource Integrity**: every script and stylesheet tag carries the SHA-256 of its file, so the browser refuses to run a modified file served under an unmodified page (`npm run hashes` keeps the attributes current).
 - **File integrity check**: the 10 frontend files are hashed by the server and by the browser, compared with the hashes seen on the previous visit, and linked to GitHub for external comparison.
 - **Boss key** (double ESC): instant logout and memory wipe.
 
@@ -235,7 +236,7 @@ The suite (`test/`, Node's built-in test runner, no extra dependencies) starts r
 
 ## 🔏 Trusted Hashes (SHA-256)
 
-The repository forces LF line endings (`.gitattributes`), so these hashes are the same on GitHub, in any checkout (Windows included) and in the Docker image. Compare them with what your instance serves; `npm test` fails if this table is out of date; regenerate it with `npm run hashes`.
+The repository forces LF line endings (`.gitattributes`), so these hashes are the same on GitHub, in any checkout (Windows included) and in the Docker image. Compare them with what your instance serves; `npm test` fails if this table or the pages' integrity attributes are out of date; regenerate both with `npm run hashes`.
 
 <!-- hashes:start -->
 | File | SHA-256 |
@@ -246,10 +247,10 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
 | `drop.js` | `b9c09fe71b9eaa68babaf3d41f6d084c0d61a408293ff970379c74867f6d9998` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `67568add654191c2e27c25b40849f74baf01be95fbefce0434ccb86a1364660a` |
-| `about.html` | `5eea32319dfd255efd0eab6c8816c835e577adccbc0ed14a5e50599ebfc4b1e6` |
-| `drop.html` | `f615b2f5e8fdd0233104147e9ebdd9842006f54ed122666e3b9163879e05663a` |
-| `share.html` | `e0434b3e4644423b0aa5aa5bb47a10f8d9baa992c30f1a78e4152b9ff833450c` |
+| `index.html` | `19e8307d8e5e469bd8b35a6afbb8133e806d5f561f429c09760b2bbe44fb53b4` |
+| `about.html` | `d6feb181b4a0827be3fab6047412eaa0630a22871b73638f8f2241883c44ad45` |
+| `drop.html` | `f30c938327d1fb1782674331ade063b2d653476b89e319357ae1e6f2aeec73d4` |
+| `share.html` | `6f686e29d28cc38f15373e4d0175b239000a1ef8b94a8bc817b8b205f08c20e9` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
