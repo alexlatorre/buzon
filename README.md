@@ -240,13 +240,13 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `538da5ea0d8967149a81b0cfb77626d80829cb9e90e2aead5a99f668d49e6ec1` |
+| `app.js` | `fe70f50ba9e534ce3ea6069b9622f306924a616b875074047c696a6de9420908` |
 | `crypto.js` | `af2f299ba7c7d0db4751b8be26c6c4421e5d24af8d66ba3b0e1d0cc75961f7b9` |
 | `integrity.js` | `3891adc44c05e55b436347f8d5a43a82992e7c1a14585ebef060bdc1ed4041fe` |
 | `share.js` | `4b6845353d71d6eef468e2922b8e2c029efd912c3572aa1d4b7344bb41e5721e` |
 | `drop.js` | `b9c09fe71b9eaa68babaf3d41f6d084c0d61a408293ff970379c74867f6d9998` |
 | `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `8bf3db7b98e4cd473526d5056e9ea7cee3542d45aa93d2d23f540a4e2c0413fb` |
+| `index.html` | `67568add654191c2e27c25b40849f74baf01be95fbefce0434ccb86a1364660a` |
 | `about.html` | `5eea32319dfd255efd0eab6c8816c835e577adccbc0ed14a5e50599ebfc4b1e6` |
 | `drop.html` | `f615b2f5e8fdd0233104147e9ebdd9842006f54ed122666e3b9163879e05663a` |
 | `share.html` | `e0434b3e4644423b0aa5aa5bb47a10f8d9baa992c30f1a78e4152b9ff833450c` |

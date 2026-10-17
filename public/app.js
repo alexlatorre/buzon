@@ -343,7 +343,10 @@ function renderPackages() {
             </div>
         `;
         // Sender name is chosen by whoever dropped the package: never parse it as HTML
-        div.querySelector('.package-sender').textContent = pkg.sender_name || 'Anonymous';
+        const senderEl = div.querySelector('.package-sender');
+        senderEl.textContent = pkg.sender_name || 'Anonymous';
+        // Anyone with the link can type any name
+        senderEl.title = 'Sender name as typed by the sender, not verified';
         pkgList.appendChild(div);
     });
 }

@@ -32,3 +32,9 @@ test('login fields use autocomplete values browsers honour', () => {
     const sharePage = fs.readFileSync(path.join(__dirname, '..', 'public', 'share.html'), 'utf8');
     assert.match(sharePage, /<input[^>]*id="share-password"[^>]*autocomplete="new-password"/);
 });
+
+test('the sender name is presented as unverified', () => {
+    assert.match(html, /<strong>Sender<\/strong> <span class="text-muted">\(not verified\)<\/span>:/);
+    const render = app.slice(app.indexOf('function renderPackages('), app.indexOf('async function openPackage('));
+    assert.match(render, /\.title = 'Sender name as typed by the sender, not verified'/);
+});
