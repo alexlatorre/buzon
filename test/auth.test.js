@@ -210,3 +210,12 @@ test('logout invalidates the session', async () => {
     assert.equal((await api.json('POST', '/api/auth/logout', null, alice.sessionToken)).status, 200);
     assert.equal((await api.json('GET', `/api/packages/${alice.id}`, null, alice.sessionToken)).status, 401);
 });
+
+test('usernames never reach the server log, migration included', async () => {
+    const { user } = await api.register('logged_name_check', 'a long password');
+    db.prepare("UPDATE users SET server_auth_hash = 'LEGACY_MIGRATION_REQUIRED' WHERE id = ?").run(user.id);
+    assert.equal((await api.login('logged_name_check', 'a long password')).status, 200);
+    await new Promise(r => setTimeout(r, 50));
+    assert.match(server.logs(), new RegExp(`Legacy account ${user.id} migrated`));
+    assert.equal(server.logs().includes('logged_name_check'), false);
+});

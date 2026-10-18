@@ -640,7 +640,7 @@ app.post('/api/auth/login', async (req, res) => {
             if (!safeEqual(pending.expectedResponse, challengeResponse)) {
                 return res.status(401).json({ error: 'Invalid credentials' });
             }
-            console.log(`[Auth] Legacy account migrated after key-possession proof: ${username}`);
+            console.log(`[Auth] Legacy account ${user.id} migrated after key-possession proof`);
             await db.updateServerAuthHash(user.id, hashAuthToken(serverAuthHash));
         } else if (!verifyAuthHash(user.server_auth_hash, serverAuthHash)) {
             return res.status(401).json({ error: 'Invalid credentials' });
