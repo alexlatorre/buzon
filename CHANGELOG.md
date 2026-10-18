@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.0.1 — 2026-10-18
+
+Dependency maintenance; no behaviour change.
 
 - better-sqlite3 13: built on N-API, prebuilt binaries ship inside the package (Alpine included), no install script any more.
 - The `uuid` dependency is gone: ids come from Node's `crypto.randomUUID()` (same v4 format).
