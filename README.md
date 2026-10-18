@@ -4,7 +4,7 @@
 
 Shadow Drop is a file and message delivery platform with a **Zero-Knowledge** architecture. Anyone can send you files and messages through a link; everything is encrypted in the sender's browser and only your browser can decrypt it. The server stores encrypted blobs it cannot read.
 
-https://gallifrey.sytes.net/
+Live instance: **https://gallifrey.tail093fe.ts.net/** (published through Tailscale Funnel while the home connection has no public IPv4; it will move back to `gallifrey.sytes.net`).
 
 🇪🇸 [Versión en español más abajo](#-español)
 
@@ -206,6 +206,16 @@ docker run -d -p 127.0.0.1:4000:4000 -v ./data:/app/data \
   -e TLS=off -e TRUST_PROXY=1 --name shadow-drop shadow-drop
 ```
 
+### Without a public IP (CG-NAT): Tailscale Funnel
+
+If your connection is behind carrier-grade NAT (the router's WAN address is in `100.64.0.0/10`), nothing from the internet can reach your ports and Let's Encrypt cannot validate a domain. [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) publishes the app over HTTPS at `https://<machine>.<tailnet>.ts.net` without opening any port; Tailscale issues and renews the certificate.
+
+1. Run the container behind a proxy, as above (`TLS=off`, `TRUST_PROXY=1`, published on `127.0.0.1:4000` only).
+2. Enable HTTPS certificates and Funnel for the machine in the Tailscale admin console (the first `tailscale funnel` prints the link).
+3. `sudo tailscale funnel --bg 4000`, and `sudo tailscale funnel status` to check. Turn it off with `sudo tailscale funnel --https=443 off`.
+
+Funnel passes the client address in `X-Forwarded-For`, so with `TRUST_PROXY=1` the rate limits still apply per client. The address includes your tailnet name, which becomes public.
+
 ---
 
 ## 🧪 Tests
@@ -378,6 +388,8 @@ docker run -d -p 443:4000 \
 ```
 
 El contenedor se ejecuta como el usuario `node` (uid 1000): el volumen `data` tiene que ser suyo (`sudo chown -R 1000:1000 ./data`) y debe poder leer `privkey.pem`. Detrás de un proxy inverso usa `-e TLS=off -e TRUST_PROXY=1`.
+
+Sin IP pública (CG-NAT, la IP de WAN del router está en `100.64.0.0/10`), se puede publicar con Tailscale Funnel: `sudo tailscale funnel --bg 4000` con el contenedor en `127.0.0.1:4000`, `TLS=off` y `TRUST_PROXY=1`. Detalles en [Without a public IP](#without-a-public-ip-cg-nat-tailscale-funnel).
 
 ## Seguridad: cómo avisar
 Si encuentras una vulnerabilidad, no abras una incidencia pública: sigue [SECURITY.md](SECURITY.md).
