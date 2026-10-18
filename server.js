@@ -5,7 +5,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
-const { v4: uuidv4 } = require('uuid');
 const rateLimit = require('express-rate-limit');
 const db = require('./db');
 
@@ -305,7 +304,7 @@ const dropStorage = multer.diskStorage({
         cb(null, DROP_DIR);
     },
     filename: (req, file, cb) => {
-        cb(null, `${uuidv4()}.upload`);
+        cb(null, `${crypto.randomUUID()}.upload`);
     }
 });
 const MAX_DROP_FILES = 20;

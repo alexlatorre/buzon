@@ -1,6 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 const fs = require('fs');
 const { dataLeftovers, lostDatabaseMessage } = require('./leftovers');
@@ -142,7 +142,7 @@ module.exports = {
     ready: Promise.resolve(),
 
     createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000') => {
-        const id = uuidv4();
+        const id = randomUUID();
         db.prepare(`
             INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -210,7 +210,7 @@ module.exports = {
     },
 
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {
-        const id = uuidv4();
+        const id = randomUUID();
         db.prepare(`
             INSERT INTO packages (id, user_id, sender_name, encrypted_session_key, encrypted_message, message_iv, format)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -219,7 +219,7 @@ module.exports = {
     },
 
     addPackageFile: async (packageId, originalName, mimeType, size) => {
-        const id = uuidv4();
+        const id = randomUUID();
         db.prepare('INSERT INTO package_files (id, package_id, original_name, mime_type, size) VALUES (?, ?, ?, ?, ?)').run(id, packageId, originalName, mimeType, size);
         return id;
     },
@@ -262,7 +262,7 @@ module.exports = {
     },
 
     generateOneTimeLink: async (userId) => {
-        const token = uuidv4();
+        const token = randomUUID();
         db.prepare('INSERT INTO one_time_links (token, user_id) VALUES (?, ?)').run(token, userId);
         return token;
     },

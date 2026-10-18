@@ -1,7 +1,7 @@
 // db/mysql.js - MySQL / MariaDB driver for Buzon (same interface as db/sqlite.js)
 // Tested against MariaDB 11.4 in strict mode: MYSQL_TEST_URL=mysql://user:pass@host:port npm test
 
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const mysql = require('mysql2/promise'); // a hard dependency: without it the server must not start
 const config = require('../config').db.mysql;
 const { dataLeftovers, lostDatabaseMessage } = require('./leftovers');
@@ -181,7 +181,7 @@ module.exports = {
 
     // Structural placeholders - Implementation would map SQLite queries to MySQL syntax
     createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000') => {
-        const id = uuidv4();
+        const id = randomUUID();
         await pool.execute(
             'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date(), kdf]
@@ -274,7 +274,7 @@ module.exports = {
     },
 
     createPackage: async (userId, senderName, encryptedSessionKey, encryptedMessage, messageIv, format = 1) => {
-        const id = uuidv4();
+        const id = randomUUID();
         await pool.execute(
             'INSERT INTO packages (id, user_id, sender_name, encrypted_session_key, encrypted_message, message_iv, format) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [id, userId, orNull(senderName), encryptedSessionKey, encryptedMessage, messageIv, format]
@@ -283,7 +283,7 @@ module.exports = {
     },
 
     addPackageFile: async (packageId, originalName, mimeType, size) => {
-        const id = uuidv4();
+        const id = randomUUID();
         await pool.execute(
             'INSERT INTO package_files (id, package_id, original_name, mime_type, size) VALUES (?, ?, ?, ?, ?)',
             [id, packageId, originalName, mimeType, size]
@@ -333,7 +333,7 @@ module.exports = {
     },
 
     generateOneTimeLink: async (userId) => {
-        const token = uuidv4();
+        const token = randomUUID();
         await pool.execute('INSERT INTO one_time_links (token, user_id) VALUES (?, ?)', [token, userId]);
         return token;
     },

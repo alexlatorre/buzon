@@ -21,7 +21,6 @@
         "express": "^5.3.0",
         "express-rate-limit": "^8.7.1",
         "multer": "^2.4.0",
-        "mysql2": "^3.24.6",
-        "uuid": "^13.0.2"
+        "mysql2": "^3.24.6"
     }
 }
