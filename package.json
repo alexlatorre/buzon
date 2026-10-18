@@ -1,6 +1,6 @@
 {
     "name": "buzon",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "description": "Secure Drop Box with E2E Encryption",
     "main": "server.js",
     "scripts": {
