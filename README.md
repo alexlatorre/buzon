@@ -123,6 +123,8 @@ Be clear about what Shadow Drop protects against:
 - **Registration reveals whether a username exists** (it must, to avoid duplicates). Login does not.
 - **Sessions are kept in memory**: restarting the server logs everyone out.
 
+Found something outside these limits? See [SECURITY.md](SECURITY.md) for how to report it privately.
+
 ---
 
 ## 📦 Installation
@@ -219,6 +221,8 @@ The MySQL/MariaDB driver tests are skipped unless `MYSQL_TEST_URL` points at a s
 ```bash
 MYSQL_TEST_URL=mysql://root:password@127.0.0.1:3306 npm test
 ```
+
+GitHub Actions runs the whole suite, MySQL included (against MariaDB 11.4), on Node 22 and 24 for every push and pull request (`.github/workflows/test.yml`).
 
 ---
 
@@ -374,6 +378,9 @@ docker run -d -p 443:4000 \
 ```
 
 El contenedor se ejecuta como el usuario `node` (uid 1000): el volumen `data` tiene que ser suyo (`sudo chown -R 1000:1000 ./data`) y debe poder leer `privkey.pem`. Detrás de un proxy inverso usa `-e TLS=off -e TRUST_PROXY=1`.
+
+## Seguridad: cómo avisar
+Si encuentras una vulnerabilidad, no abras una incidencia pública: sigue [SECURITY.md](SECURITY.md).
 
 ## Licencia
 AGPL-3.0: código abierto; quien lo modifique y lo ofrezca como servicio debe publicar sus cambios.
