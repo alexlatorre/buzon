@@ -11,6 +11,12 @@ const IntegrityCheck = {
     detailsPanel: null,
     detailsVisible: false,
 
+    // Every value put into markup goes through this: file names and hashes come from the server and
+    // from localStorage, and none of them should be able to add markup to the page
+    esc(value) {
+        return String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    },
+
     // Same yyyy/mm/dd HH:MM format as the inbox (app.js loads after this file)
     formatDateTime(date) {
         const pad = n => String(n).padStart(2, '0');
@@ -107,7 +113,7 @@ const IntegrityCheck = {
 
         // Status header
         html += `<div class="integrity-status-row">
-            <span class="integrity-status-text">${details.statusText || 'Unknown'}</span>
+            <span class="integrity-status-text">${this.esc(details.statusText || 'Unknown')}</span>
         </div>`;
 
         // File hash table
@@ -120,16 +126,16 @@ const IntegrityCheck = {
                 const storedHash = stored && stored.hashes && stored.hashes[file];
                 const statusIcon = isChanged ? '⚠️' : '✓';
                 const statusClass = isChanged ? 'integrity-hash-changed' : 'integrity-hash-ok';
-                const githubFileUrl = `${this.GITHUB_REPO}/blob/${this.GITHUB_BRANCH}/public/${file}`;
+                const githubFileUrl = `${this.GITHUB_REPO}/blob/${this.GITHUB_BRANCH}/public/${encodeURIComponent(file)}`;
 
                 const hashTitle = isChanged && storedHash ? `Current: ${hash}\nPrevious: ${storedHash}` : hash;
 
                 html += `<div class="integrity-hash-row ${statusClass}">
                     <div class="integrity-hash-file">
                         <span class="integrity-hash-status">${statusIcon}</span>
-                        <a href="${githubFileUrl}" target="_blank" rel="noopener" class="integrity-hash-name integrity-hash-link" title="View on GitHub">${file}</a>
+                        <a href="${this.esc(githubFileUrl)}" target="_blank" rel="noopener" class="integrity-hash-name integrity-hash-link" title="View on GitHub">${this.esc(file)}</a>
                     </div>
-                    <div class="integrity-hash-value" title="${hashTitle}">${hash}</div>
+                    <div class="integrity-hash-value" title="${this.esc(hashTitle)}">${this.esc(hash)}</div>
                 </div>`;
             }
             html += '</div>';
@@ -142,7 +148,7 @@ const IntegrityCheck = {
 
         // Timestamp
         if (stored) {
-            html += `<div class="integrity-timestamp">Fingerprints recorded: ${this.formatDateTime(new Date(stored.timestamp))}</div>`;
+            html += `<div class="integrity-timestamp">Fingerprints recorded: ${this.esc(this.formatDateTime(new Date(stored.timestamp)))}</div>`;
         }
 
         // Accept button (only on warning)
@@ -172,7 +178,7 @@ const IntegrityCheck = {
         if (!this.indicator) return;
 
         this.lastDetails = details;
-        const fingerprint = details.clientHashes && this.fingerprint ? this.fingerprint : '...';
+        const fingerprint = this.esc(details.clientHashes && this.fingerprint ? this.fingerprint : '...');
 
         switch (status) {
             case 'ok':
@@ -235,8 +241,8 @@ const IntegrityCheck = {
                 <span class="integrity-alert-icon">⚠️</span>
                 <div class="integrity-alert-text">
                     <strong>Integrity Alert</strong>
-                    <p>${details.message}</p>
-                    <p class="integrity-alert-files">${details.changedFiles ? 'Affected files: ' + details.changedFiles.join(', ') : ''}</p>
+                    <p>${this.esc(details.message)}</p>
+                    <p class="integrity-alert-files">${details.changedFiles ? 'Affected files: ' + this.esc(details.changedFiles.join(', ')) : ''}</p>
                     <a href="${githubUrl}" target="_blank" rel="noopener" class="integrity-alert-github">📂 Verify on GitHub →</a>
                 </div>
                 <button class="integrity-alert-dismiss" id="integrity-alert-close">✕</button>
