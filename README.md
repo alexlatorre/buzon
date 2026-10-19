@@ -4,7 +4,7 @@
 
 Shadow Drop is a file and message delivery platform with a **Zero-Knowledge** architecture. Anyone can send you files and messages through a link; everything is encrypted in the sender's browser and only your browser can decrypt it. The server stores encrypted blobs it cannot read.
 
-Live instance: **https://gallifrey.tail093fe.ts.net/** (published through Tailscale Funnel while the home connection has no public IPv4; it will move back to `gallifrey.sytes.net`).
+Live instance: **https://gallifrey.sytes.net/**
 
 🇪🇸 [Versión en español más abajo](#-español)
 
