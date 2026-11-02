@@ -93,6 +93,9 @@ async function handleRegister() {
     const password = document.getElementById('password').value;
 
     if (!username || password.length < 8) return showMsg('Username and password (min 8) required.', 'error');
+    if (activationToken && password !== document.getElementById('password-confirm').value) {
+        return showMsg('The passwords do not match.', 'error');
+    }
 
     try {
         showMsg('Generating RSA-4096 key pair... (might take a few seconds)', 'info');
@@ -127,15 +130,19 @@ async function handleRegister() {
                 publicKey: pubKeyBase64,
                 encryptedPrivateKey: encryptedPrivResult.ciphertext,
                 iv: encryptedPrivResult.iv,
-                serverAuthHash: serverAuthHash
+                serverAuthHash: serverAuthHash,
+                ...(activationToken ? { invitationToken: activationToken } : {})
             })
         });
 
         const data = await res.json();
         if (res.ok) {
             await CryptoUtils.pinLogin(loginStorage(), username, CryptoUtils.loginParams(kdf, saltBase64));
-            showMsg('Vault created. You may now login.', 'success');
+            const activated = Boolean(activationToken);
+            if (activated) await endActivation();
+            showMsg(activated ? 'Account activated. Log in with your new password.' : 'Vault created. You may now login.', 'success');
             document.getElementById('password').value = ''; // clear for safety
+            document.getElementById('password-confirm').value = '';
         } else {
             showMsg('Error: ' + data.error, 'error');
         }
@@ -230,8 +237,10 @@ async function handleLogin() {
             privateKey,
             publicKey,
             keyFingerprint: fingerprint,
+            role: data.role === 'admin' ? 'admin' : 'user',
             sessionToken: data.sessionToken
         };
+        document.getElementById('btn-open-admin').classList.toggle('hidden', currentUser.role !== 'admin');
         document.getElementById('password').value = '';
 
         // "#k=" lets senders check the key the server gives them; the fragment is never sent to the server
@@ -312,6 +321,8 @@ function secureLogout() {
         shareResultLink.value = '';
         closePasswordModal();
         resetRotateModal();
+        closeAdminModal();
+        document.getElementById('btn-open-admin').classList.add('hidden');
         // Close the mobile drawer, or it greets the next person who logs in
         sidebar.classList.remove('sidebar-open');
         sidebarOverlay.classList.remove('active');
@@ -1274,6 +1285,309 @@ btnCopyRotate.addEventListener('click', () => {
         setTimeout(() => { btnCopyRotate.textContent = '📋 Copy Link'; }, 3000);
     });
 });
+
+// --- Registration switch and activation links ---
+// An admin-created account arrives as "#activate=<token>": the fragment never reaches the server or its
+// logs. The page shows the username, takes the token out of the address bar, and registration then
+// creates the keys here and sends the token along.
+let activationToken = null;
+
+async function initAuthOptions() {
+    const match = /^#activate=([A-Za-z0-9_-]{43})$/.exec(window.location.hash || '');
+    if (match) return startActivation(match[1]);
+    try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        btnRegister.classList.toggle('hidden', res.ok && config.registrationOpen === false);
+    } catch (e) {
+        // Keep the button: the server refuses registration anyway when it is closed
+    }
+}
+
+async function startActivation(token) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    let data = {};
+    let ok = false;
+    try {
+        const res = await fetch('/api/auth/invitation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        });
+        data = await res.json().catch(() => ({}));
+        ok = res.ok && typeof data.username === 'string';
+    } catch (e) {
+        ok = false;
+    }
+    if (!ok) {
+        btnRegister.classList.add('hidden');
+        // Whoever held the link could have used it first: say so, so the person can raise it
+        if (data.code === 'activated') {
+            return showMsg('This activation link was already used. If you did not activate the account yourself, tell your administrator: someone else may have taken it.', 'error');
+        }
+        return showMsg('This activation link is invalid or expired. Ask your administrator for a new one.', 'error');
+    }
+    activationToken = token;
+    const usernameInput = document.getElementById('username');
+    usernameInput.value = data.username;
+    usernameInput.readOnly = true;
+    const intro = document.getElementById('activate-intro');
+    intro.textContent = `Activate the account "${data.username}": choose your master password. Your keys are created in this browser now; nobody else, not even the administrator, ever sees the password.`;
+    intro.classList.remove('hidden');
+    document.getElementById('password-confirm-group').classList.remove('hidden');
+    document.getElementById('password').autocomplete = 'new-password';
+    btnLogin.classList.add('hidden');
+    btnRegister.classList.remove('hidden');
+    btnRegister.textContent = 'Activate Account';
+}
+
+async function endActivation() {
+    activationToken = null;
+    document.getElementById('username').readOnly = false;
+    document.getElementById('activate-intro').classList.add('hidden');
+    document.getElementById('password-confirm-group').classList.add('hidden');
+    document.getElementById('password').autocomplete = 'current-password';
+    btnLogin.classList.remove('hidden');
+    btnRegister.textContent = 'Register Vault';
+    await initAuthOptions();
+}
+
+// --- Administration (admins only) ---
+// Accounts, invitations, the registration switch and every account's links. The server never gives an
+// admin files, messages, file names, keys or link tokens, and this panel never asks for them.
+const adminModal = document.getElementById('admin-modal');
+const adminMsg = document.getElementById('admin-msg');
+
+function setAdminMsg(text, type = 'info') {
+    adminMsg.textContent = text;
+    adminMsg.className = text ? `msg ${type}` : 'msg';
+}
+
+async function adminRequest(method, url, body) {
+    const res = await authFetch(url, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
+
+function adminElement(tag, text, className) {
+    const element = document.createElement(tag);
+    if (text !== undefined) element.textContent = text;
+    if (className) element.className = className;
+    return element;
+}
+
+function adminDate(value) {
+    return value ? formatDateTime(new Date(value)) : '—';
+}
+
+function adminSize(bytes) {
+    return `${(Number(bytes) / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function adminButton(label, action, danger) {
+    const button = adminElement('button', label, `btn-icon-mini admin-action${danger ? ' delete-otl' : ''}`);
+    button.onclick = async () => {
+        button.disabled = true;
+        try {
+            setAdminMsg('');
+            await action();
+        } catch (error) {
+            if (error.message !== 'Session expired') setAdminMsg(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    };
+    return button;
+}
+
+function adminRow(title, meta, actions) {
+    const row = adminElement('div', undefined, 'otl-item admin-row');
+    const info = adminElement('div', undefined, 'share-item-info');
+    info.append(adminElement('div', title, 'share-item-name'), adminElement('div', meta, 'share-item-meta'));
+    const buttons = adminElement('div', undefined, 'otl-actions');
+    buttons.append(...actions);
+    row.append(info, buttons);
+    return row;
+}
+
+function adminEmpty(list, text) {
+    list.replaceChildren(adminElement('div', text, 'quota-label'));
+}
+
+async function loadAdmin() {
+    const [overview, links] = await Promise.all([
+        adminRequest('GET', '/api/admin/overview'),
+        adminRequest('GET', '/api/admin/links')
+    ]);
+    renderAdmin(overview, links);
+}
+
+function renderAdmin(overview, links) {
+    document.getElementById('admin-registration').checked = overview.registration.open;
+    document.getElementById('admin-registration-source').textContent =
+        overview.registration.setBy === 'admin' ? '(set here)' : '(server default)';
+
+    const accounts = document.getElementById('admin-accounts');
+    accounts.replaceChildren();
+    for (const a of overview.accounts) {
+        const title = `${a.username} · ${a.role}${a.disabled ? ' · disabled' : ''}`;
+        const meta = `created ${adminDate(a.createdAt)} · last login ${adminDate(a.lastLogin)} · ${adminSize(a.storageUsed)} · `
+            + `${a.packages} packages · ${a.shares} shares · ${a.oneTimeLinks} one-time links`;
+        const actions = a.id === overview.me ? [adminElement('span', 'you', 'share-item-meta')] : [
+            adminButton(a.disabled ? 'Enable' : 'Disable', async () => {
+                await adminRequest('POST', `/api/admin/accounts/${a.id}`, { disabled: !a.disabled });
+                await loadAdmin();
+            }),
+            adminButton(a.role === 'admin' ? 'Remove admin' : 'Make admin', async () => {
+                await adminRequest('POST', `/api/admin/accounts/${a.id}`, { role: a.role === 'admin' ? 'user' : 'admin' });
+                await loadAdmin();
+            }),
+            adminButton('Delete', () => deleteAdminAccount(a), true)
+        ];
+        accounts.appendChild(adminRow(title, meta, actions));
+    }
+
+    const invitations = document.getElementById('admin-invitations');
+    invitations.replaceChildren();
+    if (!overview.invitations.length) adminEmpty(invitations, 'No pending invitations');
+    for (const i of overview.invitations) {
+        const state = i.expired ? `expired ${adminDate(i.expiresAt)}` : (i.void ? 'void: its creator is no longer an active admin' : `expires ${adminDate(i.expiresAt)}`);
+        invitations.appendChild(adminRow(`${i.username} · ${i.role}`, `${state} · by ${i.createdBy}`, [
+            adminButton('Revoke', async () => {
+                await adminRequest('DELETE', `/api/admin/invitations/${i.id}`);
+                await loadAdmin();
+            }, true)
+        ]));
+    }
+
+    const publicLinks = document.getElementById('admin-public-links');
+    publicLinks.replaceChildren();
+    const enabled = links.publicLinks.filter(p => p.enabled);
+    if (!enabled.length) adminEmpty(publicLinks, 'No public links enabled');
+    for (const p of enabled) {
+        publicLinks.appendChild(adminRow(p.username, p.disabledAccount ? 'account disabled: the link does not work' : 'public drop link on', [
+            adminButton('Disable', async () => {
+                await adminRequest('POST', `/api/admin/accounts/${p.userId}/public-link`, { enabled: false });
+                await loadAdmin();
+            }, true)
+        ]));
+    }
+
+    const oneTime = document.getElementById('admin-one-time-links');
+    oneTime.replaceChildren();
+    if (!links.oneTimeLinks.length) adminEmpty(oneTime, 'No unused one-time links');
+    for (const o of links.oneTimeLinks) {
+        oneTime.appendChild(adminRow(o.username, `created ${adminDate(o.createdAt)}`, [
+            adminButton('Cancel', async () => {
+                await adminRequest('DELETE', `/api/admin/one-time-links/${o.ref}`);
+                await loadAdmin();
+            }, true)
+        ]));
+    }
+
+    const shares = document.getElementById('admin-shares');
+    shares.replaceChildren();
+    if (!links.shares.length) adminEmpty(shares, 'No shares');
+    for (const s of links.shares) {
+        const downloads = s.maxDownloads > 0 ? `${s.downloads}/${s.maxDownloads} downloads` : `${s.downloads} downloads`;
+        const expiry = s.expired ? 'expired, removed at the next cleanup' : (s.expiresAt ? `expires ${adminDate(s.expiresAt)}` : 'no expiry');
+        const actions = [];
+        if (!s.expired) {
+            actions.push(adminButton('Expire', async () => {
+                await adminRequest('POST', `/api/admin/shares/${s.ref}/expire`);
+                await loadAdmin();
+            }));
+        }
+        actions.push(adminButton('Cancel', async () => {
+            await adminRequest('DELETE', `/api/admin/shares/${s.ref}`);
+            await loadAdmin();
+        }, true));
+        shares.appendChild(adminRow(s.username, `${adminSize(s.size)} · ${downloads} · ${expiry} · created ${adminDate(s.createdAt)}`, actions));
+    }
+}
+
+// Deleting an account cannot be undone: the server wants the admin's own password (as its auth hash)
+async function deleteAdminAccount(account) {
+    const passwordInput = document.getElementById('admin-password');
+    if (!passwordInput.value) throw new Error('Enter your password above to delete an account.');
+    if (!confirm(`Delete the account "${account.username}" with all its packages, shares and links? This cannot be undone.`)) return;
+    const key = await CryptoUtils.deriveMasterKey(passwordInput.value, currentUser.vaultParams.salt, true, currentUser.vaultParams.iterations);
+    const currentServerAuthHash = await CryptoUtils.computeServerAuthHash(key);
+    try {
+        await adminRequest('DELETE', `/api/admin/accounts/${account.id}`, { currentServerAuthHash });
+    } catch (error) {
+        throw new Error(error.message === 'Invalid credentials' ? 'Your password is wrong.' : error.message);
+    }
+    passwordInput.value = '';
+    await loadAdmin();
+    setAdminMsg(`Account ${account.username} deleted.`, 'success');
+}
+
+async function handleAdminInvite() {
+    const usernameInput = document.getElementById('admin-new-username');
+    const username = usernameInput.value.trim();
+    const role = document.getElementById('admin-new-admin').checked ? 'admin' : 'user';
+    if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) return setAdminMsg('Username: 3-32 characters, letters, digits and underscores.', 'error');
+    try {
+        const data = await adminRequest('POST', '/api/admin/invitations', { username, role });
+        document.getElementById('admin-invite-link').value = `${window.location.origin}/#activate=${data.token}`;
+        document.getElementById('admin-invite-expiry').textContent =
+            `For ${data.username} (${data.role}). Works once, until ${adminDate(data.expiresAt)}. Send it to them privately.`;
+        document.getElementById('admin-invite-result').classList.remove('hidden');
+        usernameInput.value = '';
+        document.getElementById('admin-new-admin').checked = false;
+        setAdminMsg('');
+        await loadAdmin();
+    } catch (error) {
+        if (error.message !== 'Session expired') setAdminMsg(error.message, 'error');
+    }
+}
+
+async function handleAdminRegistration() {
+    const toggle = document.getElementById('admin-registration');
+    try {
+        await adminRequest('POST', '/api/admin/registration', { open: toggle.checked });
+        await loadAdmin();
+    } catch (error) {
+        toggle.checked = !toggle.checked;
+        if (error.message !== 'Session expired') setAdminMsg(error.message, 'error');
+    }
+}
+
+async function openAdminModal() {
+    if (currentUser.role !== 'admin') return;
+    setAdminMsg('Loading...', 'info');
+    adminModal.classList.remove('hidden');
+    try {
+        await loadAdmin();
+        setAdminMsg('');
+    } catch (error) {
+        if (error.message !== 'Session expired') setAdminMsg(error.message, 'error');
+    }
+}
+
+function closeAdminModal() {
+    adminModal.classList.add('hidden');
+    setAdminMsg('');
+    for (const id of ['admin-accounts', 'admin-invitations', 'admin-public-links', 'admin-one-time-links', 'admin-shares']) {
+        document.getElementById(id).replaceChildren();
+    }
+    document.getElementById('admin-password').value = '';
+    document.getElementById('admin-new-username').value = '';
+    document.getElementById('admin-invite-link').value = '';
+    document.getElementById('admin-invite-result').classList.add('hidden');
+}
+
+document.getElementById('btn-open-admin').addEventListener('click', (e) => { e.preventDefault(); openAdminModal(); });
+document.getElementById('btn-close-admin').addEventListener('click', closeAdminModal);
+document.getElementById('btn-admin-invite').addEventListener('click', handleAdminInvite);
+document.getElementById('admin-registration').addEventListener('change', handleAdminRegistration);
+initAuthOptions();
 
 // Mobile Sidebar Toggle
 const btnMenu = document.getElementById('btn-menu');

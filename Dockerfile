@@ -13,10 +13,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=build /app/node_modules ./node_modules
-COPY package.json server.js config.js db.js ./
+COPY package.json server.js config.js db.js invitations.js ./
 COPY db/ ./db/
 COPY public/ ./public/
-COPY scripts/healthcheck.js scripts/backup.js ./scripts/
+COPY scripts/healthcheck.js scripts/backup.js scripts/admin.js ./scripts/
 
 # Create data directory for volume mount, owned by the unprivileged node user
 # (existing host volumes may need: chown -R 1000:1000 /path/to/data)

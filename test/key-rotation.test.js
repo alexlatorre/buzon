@@ -25,7 +25,8 @@ const SHARE_PASSWORD = 'correct horse battery';
 let server, api;
 
 before(async () => {
-    server = await startServer();
+    // Every page load also asks /api/config: raise the API limit for this many page loads
+    server = await startServer({ API_RATE_LIMIT: '5000' });
     api = client(server.base);
 });
 

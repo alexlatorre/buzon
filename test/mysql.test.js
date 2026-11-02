@@ -185,6 +185,38 @@ test('key rotation moves every key in one transaction and refuses lists that lea
     assert.equal((await api.login('alice', 'alice password')).status, 200);
 });
 
+test('accounts and administration work on MySQL', { skip }, async () => {
+    const url = new URL(URL_ENV);
+    const cliEnv = {
+        ...process.env, DB_ENGINE: 'mysql', MYSQL_HOST: url.hostname, MYSQL_PORT: url.port || '3306',
+        MYSQL_USER: decodeURIComponent(url.username), MYSQL_PASSWORD: decodeURIComponent(url.password), MYSQL_DATABASE: dbName
+    };
+    const r = require('child_process').spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'admin.js'), 'invite', 'mysql_admin', '--admin'], { env: cliEnv, encoding: 'utf8' });
+    const token = (/#activate=([A-Za-z0-9_-]{43})/.exec(r.stdout) || [])[1];
+    assert.ok(token, r.stdout + r.stderr);
+    const activated = await api.register('mysql_admin', 'mysql admin password', { invitationToken: token });
+    assert.equal(activated.res.status, 200);
+    assert.equal((await api.register('mysql_admin2', 'x password', { invitationToken: token })).res.status, 403);
+    const login = await api.login('mysql_admin', 'mysql admin password');
+    assert.equal(login.data.role, 'admin');
+    const t = login.data.sessionToken;
+    const overview = (await api.json('GET', '/api/admin/overview', null, t)).data;
+    assert.ok(overview.accounts.some(a => a.username === 'alice' && a.role === 'user'));
+    assert.equal((await api.json('POST', '/api/admin/registration', { open: false }, t)).status, 200);
+    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: false });
+    assert.equal((await api.json('POST', '/api/admin/registration', { open: true }, t)).status, 200);
+    const { user } = await api.register('mysql_gone', 'gone password');
+    assert.equal((await api.json('POST', `/api/admin/accounts/${user.id}`, { disabled: true }, t)).status, 200);
+    assert.equal((await api.login('mysql_gone', 'gone password')).status, 401);
+    const links = (await api.json('GET', '/api/admin/links', null, t)).data;
+    assert.ok(Array.isArray(links.shares) && Array.isArray(links.oneTimeLinks));
+    const invite = (await api.json('POST', '/api/admin/invitations', { username: 'mysql_inv' }, t)).data;
+    assert.equal((await api.json('DELETE', `/api/admin/invitations/${invite.id}`, null, t)).status, 200);
+    assert.equal((await api.json('DELETE', `/api/admin/accounts/${user.id}`, { currentServerAuthHash: 'wrong' }, t)).status, 403);
+    assert.equal((await api.json('DELETE', `/api/admin/accounts/${user.id}`, { currentServerAuthHash: activated.user.serverAuthHash }, t)).status, 200);
+    assert.equal((await q('SELECT id FROM DB.users WHERE id = ?', [user.id])).length, 0);
+});
+
 test('housekeeping runs without database errors', { skip }, async () => {
     await new Promise(r => setTimeout(r, 1500));
     assert.doesNotMatch(server.logs(), /error/i, server.logs());

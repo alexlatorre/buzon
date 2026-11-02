@@ -55,6 +55,18 @@ Live instance: **https://gallifrey.sytes.net/**
 ### 5. Security page
 From the login screen, **"How does it work? Learn about our security →"** opens a visual explanation of the whole crypto flow.
 
+### 6. Accounts and administration
+- **Open or closed registration.** `REGISTRATION=open|closed` sets the starting value (`open` by default); an admin can switch it from the panel, and that choice wins from then on. With registration closed the login page has no **Register** button and the server refuses self-registration.
+- **Accounts created by an admin.** The admin enters a username (and whether it is an admin) and gets an **activation link**, valid once for `INVITATION_TTL_HOURS` (72 by default). The person opens it, chooses their master password, and **their browser creates their keys** at that moment. The admin never sees the password or the keys. The link carries its token in the fragment (`#activate=…`), which browsers never send to the server.
+- **The first admin** is created from the server's shell:
+  ```bash
+  docker exec shadow-drop node scripts/admin.js invite alex --admin --origin https://your-host
+  ```
+  The same tool can `promote` or `demote` an existing account, switch `registration open|closed` and `list` accounts.
+- **🛡️ Admin** (in the sidebar, only for admins): switch registration, create accounts, list accounts (role, state, dates, space used, counts of packages, shares and links), enable or disable them, make or remove admins, revoke pending invitations and delete accounts (with your password; their packages, shares and links are deleted with their files). A disabled account cannot log in, its sessions end and its links stop working. The instance always keeps at least one active admin, and an admin cannot disable, demote or delete their own account. Invitations an admin created stop working as soon as that admin is demoted, disabled or deleted; the panel shows who created each one. Changes from the shell are not coordinated with the panel: if both leave no active admin, `node scripts/admin.js promote <username>` restores one.
+- **Active links**: every account's public drop link (disable only: turning it back on is the owner's choice), unused one-time links (cancel) and shares (expire now, or cancel and delete).
+- **What an admin never gets**: files, messages, file names, sender names or keys of other accounts. The admin API does not return them. One-time links and shares are shown by a reference, never by their token, so an admin cannot use them either; a public drop link is the account's id, which the admin sees (anyone can send to a public link, which gives no access to what is in the mailbox).
+
 ---
 
 ## 🔐 How the cryptography works
@@ -80,6 +92,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Auth hash at rest**: the database keeps a hash of the login token, so a leaked database cannot be replayed to log in.
 - **Legacy account migration, closed by default**: accounts created before the auth hash existed cannot log in unless `LEGACY_MIGRATION=open`; then they are upgraded only when the browser decrypts a labelled challenge encrypted with the account's public key, and answers with a hash of it.
 - **Sessions**: random bearer tokens (`Authorization: Bearer`), 24 h lifetime, ownership checked on every user resource (packages, files, shares, links).
+- **Administration without access to content**: admins manage accounts, invitations, the registration switch and links, and get metadata only (usernames, roles, dates, sizes, counts). Admin-created accounts get their keys in their owner's browser at activation; invitation tokens are stored only as SHA-256 and work once.
 - **Strict CSP and headers**: `script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, HSTS, `nosniff`, `no-referrer`, `no-store`, no CORS.
 - **Untrusted data rendered as text**: sender names and file names never go through `innerHTML`.
 - **Rate limiting**: auth (20 / 15 min), uploads (50 / 15 min) and API (200 / 15 min) per IP. `X-Forwarded-For` is only trusted when a proxy is declared (`TRUST_PROXY`, or `TLS=off`).
@@ -120,7 +133,9 @@ Be clear about what Shadow Drop protects against:
   The defence for content that already exists is not keeping it: destroy packages once downloaded (pending packages also expire after `PACKAGE_RETENTION_DAYS`, 30 days by default) and delete shares you no longer need. Backups made with `npm run backup`, and any other copy of the database, still hold the old encrypted private key and the old wrapped keys: delete them, or keep them as carefully as the password. With MySQL, old values can also stay in the database server's own logs for a while; with SQLite the server checkpoints its write-ahead log right after the rotation.
 - **The server can move a share's sealed name to another of the same owner's shares**, so the dashboard or the link page could show one share's name for another: nothing binds the name to the token, which the server chooses. It cannot read or invent a name.
 - **A stored package can be served again**: nothing ties a package to a date or a position in the inbox, so the server can show a copy of a real package twice, or with another date. It cannot change what is inside.
-- **Registration reveals whether a username exists** (it must, to avoid duplicates). Login does not.
+- **An admin holds each activation link before the person does.** Whoever opens it first chooses the password and owns the account, so an admin (or anyone the link leaks to) could activate it and receive what is sent to it. If an activation link says it was already used when you open it, tell the admin and ask for a new account. Until it is used, the link is a secret: the page removes it from the address bar, but the browser history may still list it. An admin can also delete an account and create another with the same username: senders using an old drop link are protected by its key fingerprint (`#k=`), which no longer matches.
+- **Admins see metadata**: usernames, roles, creation and last-login dates, space used and how many packages, shares and links each account has. Never contents, names or keys.
+- **Registration reveals whether a username exists** (it must, to avoid duplicates), and so does a pending invitation. Login does not.
 - **Sessions are kept in memory**: restarting the server logs everyone out.
 
 Found something outside these limits? See [SECURITY.md](SECURITY.md) for how to report it privately.
@@ -160,6 +175,8 @@ All settings are environment variables; nothing secret lives in the repository.
 | `AUTH_RATE_LIMIT` | `20` | Auth requests per IP every 15 minutes. |
 | `API_RATE_LIMIT` | `200` | Other API requests per IP every 15 minutes (login has its own limit). |
 | `REQUEST_TIMEOUT_MS` | `1800000` (30 min) | Time allowed for a whole request; raise it for very large uploads over slow links. |
+| `REGISTRATION` | `open` | `closed` turns off self-registration: only admin-created accounts (activation links) can be created. An admin can switch it at runtime; that choice, kept in the database, then wins over this value. |
+| `INVITATION_TTL_HOURS` | `72` | How long an activation link for an admin-created account stays valid. |
 | `PACKAGE_RETENTION_DAYS` | `30` | Pending packages older than this are deleted with their files by the hourly cleanup; `0` keeps them until the owner destroys them. |
 | `ORPHAN_GRACE_MS` | `3600000` (1 h) | Age after which upload files with no database row are deleted by the hourly cleanup. |
 
@@ -247,6 +264,17 @@ GitHub Actions runs the whole suite, MySQL included (against MariaDB 11.4), on N
 | `POST` | `/api/auth/rotate-keys/challenge` | ✔ | A nonce encrypted to the account's current public key (label `shadowdrop/rotation-challenge/v1`), for one rotation attempt. |
 | `POST` | `/api/auth/rotate-keys` | ✔ | Rotate keys: the current password's auth hash, `challengeId` and `challengeResponse` (SHA-256 of `shadowdrop/rotation-response/v1` ‖ nonce), the new public key (2048, 3072 or 4096 bits) and vault (`salt`, which must be new, `kdf`, `encryptedPrivateKey`, `iv`, `serverAuthHash`), and `packages: [{ id, encryptedSessionKey }]` and `shares: [{ token, ownerKey }]` naming every pending package and format 2 share (`null` keeps a key as it is). 403 for a wrong password, 403 with `code: "key-proof"` for a missing or wrong answer, 409 with `code: "lists-changed"` when the lists do not match, 409 without a code when the password changed meanwhile. Ends the account's other sessions. |
 | `POST` | `/api/auth/logout` | ✔ | End the session. |
+| `GET` | `/api/config` | – | `{ registrationOpen }` for the login page. |
+| `POST` | `/api/auth/invitation` | – | `{ token }` → the username an activation link is for. Activation itself is `POST /api/auth/register` with `invitationToken`. |
+| `GET` | `/api/admin/overview` | admin | Registration state, accounts (metadata only) and pending invitations. |
+| `POST` | `/api/admin/registration` | admin | `{ open }`: switch self-registration. |
+| `POST` / `DELETE` | `/api/admin/invitations[/:id]` | admin | Create an invitation (`{ username, role }` → one-time `token`, shown once) or revoke one. |
+| `POST` | `/api/admin/accounts/:id` | admin | `{ disabled }` and/or `{ role }`. Not on your own account; at least one active admin always remains. |
+| `DELETE` | `/api/admin/accounts/:id` | admin | Delete an account with its data and files; needs `currentServerAuthHash` (the admin's own password). |
+| `GET` | `/api/admin/links` | admin | Public, one-time and share links of every account, named by `ref`, never by token. |
+| `POST` | `/api/admin/accounts/:id/public-link` | admin | `{ enabled: false }` disables an account's public drop link. |
+| `DELETE` | `/api/admin/one-time-links/:ref` | admin | Cancel a one-time link. |
+| `POST` / `DELETE` | `/api/admin/shares/:ref[/expire]` | admin | Expire a share now (removed at the next hourly cleanup), or cancel it and delete its file. |
 | `GET` | `/api/user/:id/public-key` | – | Public key behind a drop link. |
 | `GET` | `/api/user/:id/quota` | – | Quota and usage behind a drop link. |
 | `POST` | `/api/user/:id/config` | ✔ | Enable or disable the public link. |
@@ -277,6 +305,7 @@ GitHub Actions runs the whole suite, MySQL included (against MariaDB 11.4), on N
 - **Drop format 2**: new drops are stored with `format = 2` (a column added on startup). Packages sent before still open; their names and files use the previous format. File bodies are now raw bytes, 28 bytes larger than the file. The 256 KB message limit now also covers the sealed file list and sender name. Do not roll back to a version before format 2 while it receives drops: an older server accepts them but stores them as format 1, and they will not open.
 - **No certificates means no start**: without `TLS=off`, the server no longer falls back to plain HTTP when it finds no certificates. Behind a TLS-terminating proxy, set `TLS=off` (with `TRUST_PROXY`).
 - **Lost database guard**: a missing database next to files of an earlier install stops the server (see [Backups](#-backups)).
+- **Accounts and administration**: on startup `users` gets `role`, `disabled` and `created_at` (unknown for existing accounts), and the `settings` and `invitations` tables are created. Nobody is an admin after the upgrade: create one with `node scripts/admin.js promote <username>` (or `invite <username> --admin`). Registration stays open unless `REGISTRATION=closed`.
 - **Pending packages expire** after `PACKAGE_RETENTION_DAYS` (30 by default); set `0` before upgrading to keep the old behaviour.
 - **Restart after changing `public/`** is no longer required for the integrity check, but run `npm run hashes` after any frontend change: the pages carry Subresource Integrity hashes, and a stale one makes the browser refuse the file.
 - **Users will see "Changes detected"** in the integrity badge after each release that changes the frontend. Tell them to compare with the [trusted hashes](#-trusted-hashes-sha-256) before accepting.
@@ -310,16 +339,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `251ca0bb931e348b353252d33383391663d6a9f7c92c669955059686c6b65f3e` |
+| `app.js` | `7d45d085618ca716ddf93dbeff9222cbcedbd50102771111be3fd89bf7f5f4a7` |
 | `crypto.js` | `d1812f28a693e792d1f1d8ce1651b729a17c529cb3b8ea5555808a5b186966d9` |
 | `integrity.js` | `c2c8bd10ae4691b569fe5673ce6012e8f231456bbeda5d7033b18a893dba6814` |
 | `share.js` | `162c4d9fc68d15af86b8d4f6066131c2d3e83d10d96f294518b9923bbba4cf39` |
 | `drop.js` | `73de54def55149b7fe57b50da92a2515000d320be5663b992706cba508180291` |
-| `style.css` | `6d6547c18c864f398651e6a286405f14966633eb5526e0bbd277671b3701418c` |
-| `index.html` | `38fc752a56f83597f62dffcac16083100e040a033071fc66319948384fe272a4` |
-| `about.html` | `218c8d670db6d2792b84292c8d879c160d69028924d9336cb723b9f5eb538db1` |
-| `drop.html` | `2c5d211ec615e62b9b8badd2ea41d6f4015f48449052728f99d0a86f3011cbb6` |
-| `share.html` | `c61a586ef49918c1b8e78f3cb54535ee654c19ac0870a76ff493233fe0c7bd60` |
+| `style.css` | `615e951b9b3ec8e2116688fb6049b551244e368dcdd5a68713085af271832281` |
+| `index.html` | `c4e2d996f25ffa365f03696587fe8a26a858fc1e1efd487ca7cddd8fabc2addd` |
+| `about.html` | `939fceb137c6ab1972cb1c2a15e38479b1a0cff9c440ff8439fcebe9d8928db7` |
+| `drop.html` | `c7201a8e9b2da8469566ac54a20ebf8201f1b4ad9b7960ffc9b1161373bfc97e` |
+| `share.html` | `cef48c1c769b633482f0bfb775a5e45ddccc309c54c5bba394eace0ab9c31f04` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -346,6 +375,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 - **Cifrado de extremo a extremo**: RSA-4096 (OAEP) + AES-256-GCM + PBKDF2 (600 000 iteraciones).
 - **El servidor no ve** contraseñas, claves, mensajes, contenido de ficheros ni (en los envíos) sus nombres.
 - **Paquetes sellados** (formato 2): el servidor no puede intercambiar ficheros, nombres o mensajes, quitar o duplicar un fichero ni cambiar el nombre del remitente sin que la bandeja lo avise.
+- **Administración sin acceso al contenido**: `REGISTRATION=open|closed` y un interruptor en el panel abren o cierran el registro. Un admin crea cuentas con un enlace de activación de un solo uso: la persona elige su contraseña y su navegador crea las claves. El admin gestiona cuentas (activar, desactivar, roles, borrar con su contraseña) y enlaces (desactivar, cancelar, caducar), pero nunca recibe ficheros, mensajes, nombres ni claves. El primer admin se crea con `node scripts/admin.js invite <usuario> --admin`.
 - **Cambio de contraseña sin cambiar las claves**: el navegador vuelve a cifrar la misma clave privada; el servidor pide además la contraseña actual y cierra las demás sesiones.
 - **Rotación de claves**: el navegador genera un par nuevo y solo mueve las claves pequeñas (la de sesión de cada paquete pendiente y la del nombre de cada share de formato 2), sin tocar ficheros, nombres ni mensajes. El servidor exige la contraseña y una prueba de que tienes la clave privada actual, lo aplica todo en una transacción, solo si la lista cubre todos los paquetes y esos shares, y rechaza los envíos de la página de envío cifrados para una clave que ya no es la tuya.
 - **Derivación de clave por cuenta**: el navegador rechaza cualquiera más débil que PBKDF2 con 600 000 iteraciones.

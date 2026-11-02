@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Accounts and administration.** `REGISTRATION=open|closed` and an admin switch control self-registration. Admins create accounts as one-time activation links (the person picks the password and their browser creates the keys), manage accounts (enable, disable, roles, delete with the admin's password) and every account's links (disable public links, cancel one-time links, expire or cancel shares), and never get files, messages, names, keys or link tokens. `scripts/admin.js` creates the first admin from the server's shell.
+
 ## 2.0.1 — 2026-10-18
 
 Dependency maintenance; no behaviour change.

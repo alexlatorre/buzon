@@ -88,6 +88,45 @@ function fakeSaltFor(username) {
 // (there is nothing else to check the password against), which allows offline guessing. So it is
 // closed by default; set LEGACY_MIGRATION=open for as long as legacy owners need to log in once.
 const LEGACY_MIGRATION_OPEN = process.env.LEGACY_MIGRATION === 'open';
+
+// Self-registration: REGISTRATION=open|closed is the starting value; an admin can switch it at runtime,
+// and that choice (kept in the database) wins over the environment from then on
+const REGISTRATION_DEFAULT = process.env.REGISTRATION === undefined || process.env.REGISTRATION === '' ? 'open' : process.env.REGISTRATION;
+if (!['open', 'closed'].includes(REGISTRATION_DEFAULT)) {
+    console.error(`REGISTRATION must be "open" or "closed", not "${REGISTRATION_DEFAULT}".`);
+    process.exit(1);
+}
+async function registrationOpen() {
+    const stored = await db.getSetting('registration');
+    return (stored || REGISTRATION_DEFAULT) === 'open';
+}
+
+// Accounts created by an admin are invitations: a random one-time token (shown once to the admin, then
+// handed to the person) lets its holder pick a password and create the keys in their own browser.
+// Only the token's SHA-256 is stored, so a copy of the database cannot activate anything.
+const INVITATION_TTL_HOURS = Number(process.env.INVITATION_TTL_HOURS) || 72;
+const { newInvitationToken, invitationTokenHash, isInvitationToken } = require('./invitations');
+const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,32}$/;
+
+// An invitation counts only while it has not expired and, when an admin created it, while that admin is
+// still an active admin: demoting, disabling or deleting an admin voids what they handed out.
+// Invitations created from the server's shell (no creator) depend only on the expiry.
+async function usableInvitation(invitation) {
+    if (!invitation || storedDate(invitation.expires_at) <= Date.now()) return false;
+    if (!invitation.created_by) return true;
+    const creator = await db.getUserById(invitation.created_by);
+    return Boolean(creator && creator.role === 'admin' && !creator.disabled);
+}
+
+// The username was taken between the check and the insert (two requests racing)
+const isUniqueViolation = error => ['SQLITE_CONSTRAINT_UNIQUE', 'SQLITE_CONSTRAINT_PRIMARYKEY', 'ER_DUP_ENTRY'].includes(error && error.code);
+
+// Ends every session of an account (all of them, or all but the one making the change)
+function endUserSessions(userId, exceptToken) {
+    for (const [token, session] of sessions) {
+        if (session.userId === userId && token !== exceptToken) sessions.delete(token);
+    }
+}
 const MIGRATION_CHALLENGE_LABEL = Buffer.from('shadowdrop/migration-challenge/v1');
 const MIGRATION_RESPONSE_PREFIX = Buffer.from('shadowdrop/migration-response/v1');
 // Keyed by a random id per attempt, so one login attempt can only consume its own challenge and a
@@ -433,9 +472,15 @@ async function getStorageUsage(userId) {
 // Resolves a drop link (user ID with public link enabled, or unused one-time token)
 async function findDropRecipient(idOrToken) {
     let user = await db.getUserById(idOrToken);
-    if (user && user.public_link_enabled !== 0) return { user, isToken: false };
+    if (user && !user.disabled && user.public_link_enabled !== 0) return { user, isToken: false };
     user = await db.getUserByToken(idOrToken);
-    return user ? { user, isToken: true } : null;
+    return user && !user.disabled ? { user, isToken: true } : null;
+}
+
+// A share stops working while its owner's account is disabled
+async function shareOwnerDisabled(share) {
+    const owner = await db.getUserById(share.user_id);
+    return !owner || Boolean(owner.disabled);
 }
 
 // Runs before multer so nothing touches the disk for invalid links or full mailboxes
@@ -559,7 +604,19 @@ function rotationListsError(packages, shares, newKeyBits) {
 // 1. Auth / Register
 app.post('/api/auth/register', async (req, res) => {
     try {
-        const { username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash } = req.body;
+        const { username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, invitationToken } = req.body;
+
+        // With registration closed, only the holder of an invitation can create an account (and only the
+        // one the invitation names); with it open, an invitation still decides the username and role
+        let invitation = null;
+        if (invitationToken !== undefined) {
+            invitation = isInvitationToken(invitationToken) ? await db.getInvitationByTokenHash(invitationTokenHash(invitationToken)) : null;
+            if (!(await usableInvitation(invitation)) || invitation.username !== username) {
+                return res.status(403).json({ error: 'Invalid or expired invitation' });
+            }
+        } else if (!(await registrationOpen())) {
+            return res.status(403).json({ error: 'Registration is closed' });
+        }
 
         if (!username || !salt || !publicKey || !encryptedPrivateKey || !iv || !serverAuthHash) {
             return res.status(400).json({ error: 'Missing required registration data' });
@@ -578,15 +635,56 @@ app.post('/api/auth/register', async (req, res) => {
         }
 
         const existingUser = await db.getUserByUsername(username);
-        if (existingUser) {
+        // A pending invitation reserves its username too (an expired one no longer does)
+        if (existingUser || (!invitation && await usableInvitation(await db.getInvitationByUsername(username)))) {
             return res.status(409).json({ error: 'User already exists' });
         }
 
-        const id = await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv, hashAuthToken(serverAuthHash), req.body.kdf || DEFAULT_KDF);
+        let id;
+        try {
+            id = invitation
+                ? await db.createInvitedUser(invitation.id, invitation.token_hash, username, salt, publicKey, encryptedPrivateKey, iv, hashAuthToken(serverAuthHash), req.body.kdf || DEFAULT_KDF, invitation.role)
+                : await db.createUser(username, salt, publicKey, encryptedPrivateKey, iv, hashAuthToken(serverAuthHash), req.body.kdf || DEFAULT_KDF);
+        } catch (error) {
+            if (isUniqueViolation(error)) return res.status(409).json({ error: 'User already exists' });
+            throw error;
+        }
+        // Used or expired in the meantime (two activations racing)
+        if (!id) return res.status(403).json({ error: 'Invalid or expired invitation' });
+        if (invitation) console.log(`[Admin] Invitation ${invitation.id} activated as account ${id} (${invitation.role})`);
         res.json({ success: true, userId: id });
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Server error during registration' });
+    }
+});
+
+// What the login page needs before anyone logs in
+app.get('/api/config', async (req, res) => {
+    try {
+        res.json({ registrationOpen: await registrationOpen() });
+    } catch (error) {
+        console.error('Config error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// The username an activation link is for, so the page can show it; nothing else about the invitation.
+// POST, so the token never ends up in an access log; under /api/auth/, so the auth rate limit applies.
+app.post('/api/auth/invitation', async (req, res) => {
+    try {
+        const token = req.body && req.body.token;
+        if (!isInvitationToken(token)) return res.status(404).json({ error: 'Invalid or expired invitation' });
+        const invitation = await db.getInvitationByTokenHash(invitationTokenHash(token));
+        if (await usableInvitation(invitation)) return res.json({ username: invitation.username });
+        // Already activated: the person must know, in case someone else (whoever held the link) did it
+        if (!invitation && await db.wasInvitationActivated(invitationTokenHash(token))) {
+            return res.status(410).json({ error: 'This activation link was already used', code: 'activated' });
+        }
+        res.status(404).json({ error: 'Invalid or expired invitation' });
+    } catch (error) {
+        console.error('Invitation lookup error:', error);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -615,7 +713,8 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const user = await db.getUserByUsername(username);
-        if (!user) {
+        // A disabled account gets the same answer as a wrong password
+        if (!user || user.disabled) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
@@ -657,7 +756,7 @@ app.post('/api/auth/login', async (req, res) => {
         let current, sessionToken;
         try {
             current = await db.getUserById(user.id);
-            if (current && verifyAuthHash(current.server_auth_hash, serverAuthHash)) sessionToken = createSession(user.id);
+            if (current && !current.disabled && verifyAuthHash(current.server_auth_hash, serverAuthHash)) sessionToken = createSession(user.id);
         } finally {
             releaseLock();
         }
@@ -669,6 +768,7 @@ app.post('/api/auth/login', async (req, res) => {
             kdf: current.kdf || DEFAULT_KDF,
             encryptedPrivateKey: current.encrypted_private_key,
             iv: current.iv,
+            role: current.role === 'admin' ? 'admin' : 'user',
             sessionToken
         });
     } catch (error) {
@@ -1188,6 +1288,7 @@ app.get('/api/share/:token/meta', async (req, res) => {
         }
         const share = await db.getShareByToken(req.params.token);
         if (!share) return res.status(404).json({ error: 'Share not found' });
+        if (await shareOwnerDisabled(share)) return res.status(410).json({ error: 'This link is no longer available' });
 
         // Check expiry
         if (share.expires_at && new Date(share.expires_at) < new Date()) {
@@ -1230,6 +1331,7 @@ app.get('/api/share/:token/download', async (req, res) => {
         }
         const share = await db.getShareByToken(req.params.token);
         if (!share) return res.status(404).json({ error: 'Share not found' });
+        if (await shareOwnerDisabled(share)) return res.status(410).json({ error: 'This link is no longer available' });
 
         // Check expiry
         if (share.expires_at && new Date(share.expires_at) < new Date()) {
@@ -1308,6 +1410,275 @@ app.delete('/api/share/:token', requireAuth, async (req, res) => {
     } catch (error) {
         console.error('Delete share error:', error);
         res.status(500).json({ error: 'Server error deleting share' });
+    }
+});
+
+// --- Administration ---
+// Admins manage accounts, invitations, the registration switch and links. They never receive files,
+// messages, file names, keys or link tokens: links are named by a reference derived from the token.
+async function requireAdmin(req, res, next) {
+    try {
+        const user = await db.getUserById(req.session.userId);
+        if (!user || user.disabled || user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+        req.admin = user;
+        next();
+    } catch (error) {
+        console.error('Admin check error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+}
+const adminOnly = [requireAuth, requireAdmin];
+
+function linkRef(token) {
+    return crypto.createHash('sha256').update('shadowdrop/admin-link-ref/v1|').update(String(token)).digest('hex').slice(0, 24);
+}
+const LINK_REF_REGEX = /^[0-9a-f]{24}$/;
+const isoDate = value => (value ? new Date(storedDate(value)).toISOString() : null);
+
+app.get('/api/admin/overview', adminOnly, async (req, res) => {
+    try {
+        const stored = await db.getSetting('registration');
+        const accounts = [];
+        for (const a of await db.listAccounts()) {
+            accounts.push({
+                id: a.id, username: a.username, role: a.role === 'admin' ? 'admin' : 'user', disabled: Boolean(a.disabled),
+                createdAt: isoDate(a.created_at), lastLogin: isoDate(a.last_login), publicLinkEnabled: a.public_link_enabled !== 0,
+                packages: Number(a.packages), shares: Number(a.shares), oneTimeLinks: Number(a.one_time_links),
+                storageUsed: await getStorageUsage(a.id)
+            });
+        }
+        const names = new Map(accounts.map(a => [a.id, a.username]));
+        const invitations = [];
+        for (const i of await db.listInvitations()) {
+            invitations.push({
+                id: i.id, username: i.username, role: i.role, expiresAt: isoDate(i.expires_at), createdAt: isoDate(i.created_at),
+                createdBy: i.created_by ? (names.get(i.created_by) || 'a deleted account') : 'server shell',
+                expired: storedDate(i.expires_at) <= Date.now(), void: !(await usableInvitation(i))
+            });
+        }
+        res.json({
+            registration: { open: (stored || REGISTRATION_DEFAULT) === 'open', setBy: stored ? 'admin' : 'environment' },
+            accounts, invitations, me: req.admin.id
+        });
+    } catch (error) {
+        console.error('Admin overview error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/admin/registration', adminOnly, async (req, res) => {
+    try {
+        if (typeof req.body.open !== 'boolean') return res.status(400).json({ error: 'open must be true or false' });
+        await db.setSetting('registration', req.body.open ? 'open' : 'closed');
+        console.log(`[Admin] ${req.admin.id} set registration ${req.body.open ? 'open' : 'closed'}`);
+        res.json({ open: req.body.open });
+    } catch (error) {
+        console.error('Admin registration error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/admin/invitations', adminOnly, async (req, res) => {
+    try {
+        const { username, role = 'user' } = req.body;
+        if (typeof username !== 'string' || !USERNAME_REGEX.test(username)) {
+            return res.status(400).json({ error: 'Username: 3-32 characters, alphanumeric and underscores only' });
+        }
+        if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+        if (await db.getUserByUsername(username)) return res.status(409).json({ error: 'User already exists' });
+        const pending = await db.getInvitationByUsername(username);
+        if (pending && await usableInvitation(pending)) return res.status(409).json({ error: 'User already exists' });
+        if (pending) await db.deleteInvitation(pending.id);
+        const token = newInvitationToken();
+        const expiresAt = new Date(Date.now() + INVITATION_TTL_HOURS * 3600000).toISOString();
+        let id;
+        try {
+            id = await db.createInvitation(username, role, invitationTokenHash(token), expiresAt, req.admin.id);
+        } catch (error) {
+            if (isUniqueViolation(error)) return res.status(409).json({ error: 'User already exists' });
+            throw error;
+        }
+        console.log(`[Admin] ${req.admin.id} created invitation ${id} (${role})`);
+        // The only time the token leaves the server: the admin hands the activation link to the person
+        res.json({ id, username, role, token, expiresAt });
+    } catch (error) {
+        console.error('Admin invitation error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.delete('/api/admin/invitations/:id', adminOnly, async (req, res) => {
+    try {
+        if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+        if (!(await db.deleteInvitation(req.params.id))) return res.status(404).json({ error: 'Invitation not found' });
+        console.log(`[Admin] ${req.admin.id} revoked invitation ${req.params.id}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin invitation delete error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Disable or enable an account, or change its role. Never leaves the instance without an active admin,
+// and an admin cannot disable or demote themselves (another admin has to).
+app.post('/api/admin/accounts/:id', adminOnly, async (req, res) => {
+    try {
+        if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+        const { disabled, role } = req.body;
+        if (disabled !== undefined && typeof disabled !== 'boolean') return res.status(400).json({ error: 'disabled must be true or false' });
+        if (role !== undefined && !['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+        if (disabled === undefined && role === undefined) return res.status(400).json({ error: 'Nothing to change' });
+        if (req.params.id === req.admin.id && (disabled === true || role === 'user')) {
+            return res.status(409).json({ error: 'You cannot disable or demote your own account' });
+        }
+        // Admins are serialised here, so two of them cannot remove each other at the same time; the
+        // account is read inside the lock, as it is now, not as it was before waiting
+        const release = await lockUserQuota('admin-accounts');
+        let target;
+        try {
+            target = await db.getUserById(req.params.id);
+            if (!target) return res.status(404).json({ error: 'Account not found' });
+            const removesActiveAdmin = target.role === 'admin' && !target.disabled && (disabled === true || role === 'user');
+            if (removesActiveAdmin && await db.countActiveAdmins() <= 1) {
+                return res.status(409).json({ error: 'There must be at least one active admin' });
+            }
+            // Under the account's own lock, which logins take too: a login cannot read the account as
+            // enabled and create its session after the disable has ended the others
+            const releaseUser = await lockUserQuota(target.id);
+            try {
+                if (role !== undefined) await db.setUserRole(target.id, role);
+                if (disabled !== undefined) await db.setUserDisabled(target.id, disabled);
+                if (disabled === true) endUserSessions(target.id);
+            } finally {
+                releaseUser();
+            }
+        } finally {
+            release();
+        }
+        console.log(`[Admin] ${req.admin.id} changed account ${target.id}:${disabled !== undefined ? ` disabled=${disabled}` : ''}${role !== undefined ? ` role=${role}` : ''}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin account error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Deleting an account removes its packages, shares and links with their files. It cannot be undone, so
+// it needs the admin's own password (its auth hash), not just a session.
+app.delete('/api/admin/accounts/:id', authLimiter, adminOnly, async (req, res) => {
+    try {
+        if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+        if (typeof req.body.currentServerAuthHash !== 'string' || !verifyAuthHash(req.admin.server_auth_hash, req.body.currentServerAuthHash)) {
+            return res.status(403).json({ error: 'Invalid credentials' });
+        }
+        if (req.params.id === req.admin.id) return res.status(409).json({ error: 'You cannot delete your own account' });
+        const release = await lockUserQuota('admin-accounts');
+        let target;
+        try {
+            target = await db.getUserById(req.params.id);
+            if (!target) return res.status(404).json({ error: 'Account not found' });
+            if (target.role === 'admin' && !target.disabled && await db.countActiveAdmins() <= 1) {
+                return res.status(409).json({ error: 'There must be at least one active admin' });
+            }
+            const releaseUser = await lockUserQuota(target.id);
+            try {
+                endUserSessions(target.id);
+                for (const pkg of await db.getPackagesByUserId(target.id)) {
+                    pkg.files.forEach(f => removeFile(path.join(DROP_DIR, `${pkg.id}_${f.id}`)));
+                }
+                for (const share of await db.getSharesByUserId(target.id)) {
+                    removeFile(path.join(SHARE_DIR, `${share.token}.enc`));
+                }
+                await db.deleteUserRows(target.id);
+            } finally {
+                releaseUser();
+            }
+        } finally {
+            release();
+        }
+        console.log(`[Admin] ${req.admin.id} deleted account ${target.id}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin account delete error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Active links of every account: public drop links, unused one-time links and shares
+app.get('/api/admin/links', adminOnly, async (req, res) => {
+    try {
+        const accounts = await db.listAccounts();
+        res.json({
+            publicLinks: accounts.map(a => ({ userId: a.id, username: a.username, enabled: a.public_link_enabled !== 0, disabledAccount: Boolean(a.disabled) })),
+            oneTimeLinks: (await db.listActiveOneTimeLinks()).map(o => ({ ref: linkRef(o.token), userId: o.user_id, username: o.username, createdAt: isoDate(o.created_at) })),
+            shares: (await db.listAllShares()).map(sh => ({
+                ref: linkRef(sh.token), userId: sh.user_id, username: sh.username, size: Number(sh.size),
+                downloads: Number(sh.download_count), maxDownloads: Number(sh.max_downloads),
+                expiresAt: isoDate(sh.expires_at), createdAt: isoDate(sh.created_at),
+                expired: Boolean(sh.expires_at && storedDate(sh.expires_at) <= new Date())
+            }))
+        });
+    } catch (error) {
+        console.error('Admin links error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/admin/accounts/:id/public-link', adminOnly, async (req, res) => {
+    try {
+        if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid ID format' });
+        // Only off: turning a public link back on is the owner's decision
+        if (req.body.enabled !== false) return res.status(400).json({ error: 'Admins can only disable a public link' });
+        if (!(await db.getUserById(req.params.id))) return res.status(404).json({ error: 'Account not found' });
+        await db.togglePublicLink(req.params.id, req.body.enabled);
+        console.log(`[Admin] ${req.admin.id} set public link of ${req.params.id} ${req.body.enabled ? 'on' : 'off'}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin public link error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.delete('/api/admin/one-time-links/:ref', adminOnly, async (req, res) => {
+    try {
+        if (!LINK_REF_REGEX.test(req.params.ref)) return res.status(400).json({ error: 'Invalid reference' });
+        const link = (await db.listActiveOneTimeLinks()).find(o => linkRef(o.token) === req.params.ref);
+        if (!link || !(await db.deleteOneTimeLinkByToken(link.token))) return res.status(404).json({ error: 'Link not found' });
+        console.log(`[Admin] ${req.admin.id} cancelled a one-time link of ${link.user_id}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin one-time link error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Expire: the link stops working now and housekeeping removes the file. Cancel: removed now.
+app.post('/api/admin/shares/:ref/expire', adminOnly, async (req, res) => {
+    try {
+        if (!LINK_REF_REGEX.test(req.params.ref)) return res.status(400).json({ error: 'Invalid reference' });
+        const share = (await db.listAllShares()).find(sh => linkRef(sh.token) === req.params.ref);
+        if (!share) return res.status(404).json({ error: 'Share not found' });
+        await db.expireShare(share.token);
+        console.log(`[Admin] ${req.admin.id} expired a share of ${share.user_id}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin share expire error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.delete('/api/admin/shares/:ref', adminOnly, async (req, res) => {
+    try {
+        if (!LINK_REF_REGEX.test(req.params.ref)) return res.status(400).json({ error: 'Invalid reference' });
+        const share = (await db.listAllShares()).find(sh => linkRef(sh.token) === req.params.ref);
+        if (!share) return res.status(404).json({ error: 'Share not found' });
+        await db.deleteShare(share.token);
+        removeFile(path.join(SHARE_DIR, `${share.token}.enc`));
+        console.log(`[Admin] ${req.admin.id} cancelled a share of ${share.user_id}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Admin share delete error:', error);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -1400,6 +1771,7 @@ async function purgeExpiredPackages() {
 
 async function housekeeping() {
     await db.deleteUsedOneTimeLinks().catch(e => console.error('One-time link cleanup error:', e.message));
+    await db.deleteExpiredInvitations().catch(e => console.error('Invitation cleanup error:', e.message));
     await purgeDeadShares();
     await purgeExpiredPackages();
     await sweepOrphanFiles();

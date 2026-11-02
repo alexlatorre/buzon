@@ -393,6 +393,18 @@ input:focus, textarea:focus {
   margin-left: 0.75rem;
 }
 
+/* Administration panel */
+.admin-content { max-width: 860px; width: 95%; }
+.admin-section { border-top: 1px solid var(--border-color, #e5e7eb); padding-top: 12px; margin-top: 12px; }
+.admin-section h4 { margin: 10px 0 6px; }
+.admin-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.admin-row .share-item-meta { white-space: normal; }
+.admin-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.admin-inline input[type="text"] { flex: 1; min-width: 160px; }
+.admin-check { display: flex; align-items: center; gap: 4px; }
+.btn-icon-mini.admin-action { width: auto; padding: 0 8px; font-size: 0.8rem; }
+.activate-intro { margin-bottom: 12px; }
+
 .btn-icon-mini {
   background: none;
   border: none;

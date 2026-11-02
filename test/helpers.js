@@ -91,7 +91,8 @@ function client(base) {
     }
 
     // Same steps as handleRegister in public/app.js (RSA-2048 to keep tests fast)
-    async function register(username, password) {
+    // extra: more body fields, e.g. { invitationToken }
+    async function register(username, password, extra = {}) {
         const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
         const masterKey = await deriveMasterKey(password, salt);
         const keyPair = await subtle.generateKey(
@@ -103,7 +104,7 @@ function client(base) {
         const encPriv = await aesEncrypt(masterKey, new TextEncoder().encode(pkcs8));
         const serverAuthHash = await computeServerAuthHash(masterKey);
         const res = await json('POST', '/api/auth/register', {
-            username, salt: b64(salt), publicKey, encryptedPrivateKey: encPriv.ciphertext, iv: encPriv.iv, serverAuthHash
+            username, salt: b64(salt), publicKey, encryptedPrivateKey: encPriv.ciphertext, iv: encPriv.iv, serverAuthHash, ...extra
         });
         return { res, user: { id: res.data && res.data.userId, username, password, publicKey, privateKey: keyPair.privateKey, serverAuthHash } };
     }
@@ -202,7 +203,7 @@ function client(base) {
 async function startServerCopy(env, files = {}) {
     const repo = path.join(__dirname, '..');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buzon-copy-'));
-    for (const item of ['server.js', 'config.js', 'db.js', 'db', 'public']) {
+    for (const item of ['server.js', 'config.js', 'db.js', 'invitations.js', 'db', 'public']) {
         fs.cpSync(path.join(repo, item), path.join(dir, item), { recursive: true });
     }
     for (const [name, content] of Object.entries(files)) {

@@ -111,6 +111,31 @@ const ready = (async () => {
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         `);
+        // Settings changed at runtime by an admin, and invitations: accounts an admin created, reserved
+        // until their holder activates them with a one-time token (only its SHA-256 is stored)
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS settings (
+                \`key\` VARCHAR(64) PRIMARY KEY,
+                value VARCHAR(255) NOT NULL
+            )
+        `);
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS activated_invitations (
+                token_hash CHAR(64) PRIMARY KEY,
+                activated_at DATETIME NOT NULL
+            )
+        `);
+        await conn.query(`
+            CREATE TABLE IF NOT EXISTS invitations (
+                id VARCHAR(36) PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                role VARCHAR(16) NOT NULL DEFAULT 'user',
+                token_hash CHAR(64) UNIQUE NOT NULL,
+                expires_at DATETIME NOT NULL,
+                created_by VARCHAR(36),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
         // Columns added after the first release (CREATE TABLE IF NOT EXISTS won't add them)
         const [cols] = await conn.query(
             "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'"
@@ -121,7 +146,11 @@ const ready = (async () => {
             mailbox_quota: 'ALTER TABLE users ADD COLUMN mailbox_quota BIGINT DEFAULT 524288000',
             last_login: 'ALTER TABLE users ADD COLUMN last_login DATETIME',
             kdf: "ALTER TABLE users ADD COLUMN kdf VARCHAR(64) NOT NULL DEFAULT 'pbkdf2-sha256:600000'",
-            server_auth_hash: "ALTER TABLE users ADD COLUMN server_auth_hash VARCHAR(255) NOT NULL DEFAULT 'LEGACY_MIGRATION_REQUIRED'"
+            server_auth_hash: "ALTER TABLE users ADD COLUMN server_auth_hash VARCHAR(255) NOT NULL DEFAULT 'LEGACY_MIGRATION_REQUIRED'",
+            // Accounts: role (user/admin), disabled by an admin, creation date (unknown for older accounts)
+            role: "ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'user'",
+            disabled: 'ALTER TABLE users ADD COLUMN disabled TINYINT NOT NULL DEFAULT 0',
+            created_at: 'ALTER TABLE users ADD COLUMN created_at DATETIME'
         };
         for (const [col, sql] of Object.entries(userMigrations)) {
             if (!userCols.includes(col)) await conn.query(sql);
@@ -180,13 +209,154 @@ module.exports = {
     ready,
 
     // Structural placeholders - Implementation would map SQLite queries to MySQL syntax
-    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000') => {
+    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000', role = 'user') => {
         const id = randomUUID();
+        const now = new Date();
         await pool.execute(
-            'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date(), kdf]
+            'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, now, kdf, role, now]
         );
         return id;
+    },
+
+    // An invitation's username becomes the account; the invitation is consumed exactly once, and only
+    // while it has not expired (null otherwise). Both happen in one transaction.
+    createInvitedUser: async (invitationId, tokenHash, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf, role) => {
+        const id = randomUUID();
+        const now = new Date();
+        const conn = await pool.getConnection();
+        try {
+            await conn.beginTransaction();
+            const [used] = await conn.execute('DELETE FROM invitations WHERE id = ? AND username = ? AND expires_at > ?', [invitationId, username, now]);
+            if (used.affectedRows !== 1) {
+                await conn.rollback();
+                return null;
+            }
+            // Remembered, so the link can say it was already used
+            await conn.execute('INSERT INTO activated_invitations (token_hash, activated_at) VALUES (?, ?)', [tokenHash, now]);
+            await conn.execute(
+                'INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, now, kdf, role, now]
+            );
+            await conn.commit();
+            return id;
+        } catch (error) {
+            await conn.rollback().catch(() => {});
+            throw error;
+        } finally {
+            conn.release();
+        }
+    },
+
+    // --- Administration ---
+    getSetting: async (key) => {
+        const [rows] = await pool.execute('SELECT value FROM settings WHERE `key` = ?', [key]);
+        return rows.length ? rows[0].value : null;
+    },
+
+    setSetting: async (key, value) => {
+        await pool.execute('INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', [key, value]);
+    },
+
+    createInvitation: async (username, role, tokenHash, expiresAt, createdBy) => {
+        const id = randomUUID();
+        await pool.execute(
+            'INSERT INTO invitations (id, username, role, token_hash, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+            [id, username, role, tokenHash, new Date(expiresAt), createdBy || null]
+        );
+        return id;
+    },
+
+    getInvitationByTokenHash: async (tokenHash) => {
+        const [rows] = await pool.execute('SELECT * FROM invitations WHERE token_hash = ?', [tokenHash]);
+        return rows[0];
+    },
+
+    getInvitationByUsername: async (username) => {
+        const [rows] = await pool.execute('SELECT * FROM invitations WHERE username = ?', [username]);
+        return rows[0];
+    },
+
+    listInvitations: async () => {
+        const [rows] = await pool.execute('SELECT id, username, role, expires_at, created_at, created_by FROM invitations ORDER BY created_at DESC');
+        return rows;
+    },
+
+    wasInvitationActivated: async (tokenHash) => {
+        const [rows] = await pool.execute('SELECT 1 FROM activated_invitations WHERE token_hash = ?', [tokenHash]);
+        return rows.length > 0;
+    },
+
+    deleteInvitation: async (id) => {
+        const [result] = await pool.execute('DELETE FROM invitations WHERE id = ?', [id]);
+        return result.affectedRows > 0;
+    },
+
+    deleteExpiredInvitations: async () => {
+        const [result] = await pool.execute('DELETE FROM invitations WHERE expires_at <= ?', [new Date()]);
+        return result.affectedRows;
+    },
+
+    // Metadata only: never keys, names, messages or contents
+    listAccounts: async () => {
+        const [rows] = await pool.execute(`
+            SELECT u.id, u.username, u.role, u.disabled, u.created_at, u.last_login, u.public_link_enabled,
+                (SELECT COUNT(*) FROM packages p WHERE p.user_id = u.id AND p.status = 'pending') AS packages,
+                (SELECT COUNT(*) FROM shares s WHERE s.user_id = u.id) AS shares,
+                (SELECT COUNT(*) FROM one_time_links o WHERE o.user_id = u.id AND o.is_used = 0) AS one_time_links
+            FROM users u ORDER BY u.username
+        `);
+        return rows.map(r => ({ ...r, packages: Number(r.packages), shares: Number(r.shares), one_time_links: Number(r.one_time_links) }));
+    },
+
+    countActiveAdmins: async () => {
+        const [rows] = await pool.execute("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND disabled = 0");
+        return Number(rows[0].n);
+    },
+
+    setUserDisabled: async (userId, disabled) => {
+        await pool.execute('UPDATE users SET disabled = ? WHERE id = ?', [disabled ? 1 : 0, userId]);
+    },
+
+    setUserRole: async (userId, role) => {
+        await pool.execute('UPDATE users SET role = ? WHERE id = ?', [role, userId]);
+    },
+
+    // Rows only (the caller removes the files first): links, shares, packages and the account itself
+    deleteUserRows: async (userId) => {
+        const conn = await pool.getConnection();
+        try {
+            await conn.beginTransaction();
+            await conn.execute('DELETE FROM one_time_links WHERE user_id = ?', [userId]);
+            await conn.execute('DELETE FROM shares WHERE user_id = ?', [userId]);
+            await conn.execute('DELETE FROM packages WHERE user_id = ?', [userId]);
+            await conn.execute('DELETE FROM users WHERE id = ?', [userId]);
+            await conn.commit();
+        } catch (error) {
+            await conn.rollback().catch(() => {});
+            throw error;
+        } finally {
+            conn.release();
+        }
+    },
+
+    listActiveOneTimeLinks: async () => {
+        const [rows] = await pool.execute('SELECT o.token, o.user_id, o.created_at, u.username FROM one_time_links o JOIN users u ON u.id = o.user_id WHERE o.is_used = 0 ORDER BY o.created_at DESC');
+        return rows;
+    },
+
+    listAllShares: async () => {
+        const [rows] = await pool.execute('SELECT s.token, s.user_id, s.size, s.max_downloads, s.download_count, s.expires_at, s.created_at, u.username FROM shares s JOIN users u ON u.id = s.user_id ORDER BY s.created_at DESC');
+        return rows;
+    },
+
+    expireShare: async (token) => {
+        await pool.execute('UPDATE shares SET expires_at = ? WHERE token = ?', [new Date(), token]);
+    },
+
+    deleteOneTimeLinkByToken: async (token) => {
+        const [result] = await pool.execute('DELETE FROM one_time_links WHERE token = ?', [token]);
+        return result.affectedRows > 0;
     },
 
     getUserByUsername: async (username) => {

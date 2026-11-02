@@ -29,7 +29,8 @@ function fakeElement(tagName = 'div') {
 }
 
 // fetch(url, options) answers the page's requests; storage stands in for localStorage
-function loadAppPage({ fetch, confirm = () => true, storage = new Map(), hidden = [] } = {}) {
+// hash: the address fragment the page is opened with (e.g. an activation link)
+function loadAppPage({ fetch, confirm = () => true, storage = new Map(), hidden = [], hash = '' } = {}) {
     const elements = {};
     const document = {
         getElementById: id => (elements[id] ||= Object.assign(fakeElement(), { id })),
@@ -46,14 +47,15 @@ function loadAppPage({ fetch, confirm = () => true, storage = new Map(), hidden 
         removeItem: k => storage.delete(k)
     };
     const window = {
-        crypto: globalThis.crypto, btoa, atob, location: { origin: 'https://box.test', hash: '', search: '' },
+        crypto: globalThis.crypto, btoa, atob, location: { origin: 'https://box.test', hash, search: '', pathname: '/' },
+        history: { replaceState(state, title, url) { window.location.hash = ''; window.replacedUrl = url; } },
         addEventListener() {}, localStorage
     };
     const saved = [];
     const URL_ = { createObjectURL: blob => { saved.push(blob); return `blob:${saved.length}`; }, revokeObjectURL() {} };
     const alerts = [];
     const code = `${read('crypto.js')}\n${read('app.js')}\nreturn {
-        openPackage, downloadFile, handleLogin, handleRegister, handleShareUpload, fetchShares, handleChangePassword, handleRotateKeys, replaceOneTimeLinks, logout: secureLogout,
+        openPackage, downloadFile, handleLogin, handleRegister, handleShareUpload, fetchShares, handleChangePassword, handleRotateKeys, replaceOneTimeLinks, logout: secureLogout, openAdminModal, handleAdminInvite,
         get user() { return currentUser; }, set user(v) { currentUser = v; },
         set packages(v) { currentPackages = v; }
     };`;

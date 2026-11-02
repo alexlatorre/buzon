@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shadow Drop | Secured Receiver</title>
-  <link rel="stylesheet" href="style.css" integrity="sha256-bWVHwYyGTzmGUeaihkBfFJZmM+tVJuC70ndnGzcBQYw=">
+  <link rel="stylesheet" href="style.css" integrity="sha256-YV6VG5s+yOIRZoj7YEm1USRONo3N1aaHEwha8nGDIoE=">
 </head>
 <body>
   <div id="auth-panel" class="auth-wrapper active">
@@ -19,6 +19,7 @@
           <label for="username">Username</label>
           <input type="text" id="username" placeholder="e.g. shadow_vault" autocomplete="username" spellcheck="false">
         </div>
+        <p id="activate-intro" class="activate-intro hidden"></p>
         <div class="form-group">
           <label for="password">Master Password</label>
           <input type="password" id="password" autocomplete="current-password">
@@ -26,6 +27,10 @@
             <div class="pw-strength-bar"><div id="pw-strength-fill" class="pw-strength-fill"></div></div>
             <span id="pw-strength-label" class="pw-strength-label"></span>
           </div>
+        </div>
+        <div id="password-confirm-group" class="form-group hidden">
+          <label for="password-confirm">Repeat the password</label>
+          <input type="password" id="password-confirm" autocomplete="new-password">
         </div>
         <div class="btn-group">
           <button id="btn-login" class="btn primary">Login</button>
@@ -55,6 +60,7 @@
           <a href="#" id="btn-open-share" class="nav-item">📤 Share File</a>
           <a href="#" id="btn-open-password" class="nav-item">🔑 Change Password</a>
           <a href="#" id="btn-open-rotate" class="nav-item">🔄 Rotate Keys</a>
+          <a href="#" id="btn-open-admin" class="nav-item hidden">🛡️ Admin</a>
         </div>
         <div class="nav-group drop-link-group">
           <p class="nav-label">Your Public Drop Link</p>
@@ -142,6 +148,65 @@
   </div>
 
   <!-- Share Modal -->
+  <div id="admin-modal" class="modal hidden">
+    <div class="modal-content admin-content">
+      <div class="modal-header">
+        <h3>🛡️ Administration</h3>
+        <button id="btn-close-admin" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted">Accounts and links only: files, messages, file names and keys are never shown here, and the server does not send them to admins.</p>
+        <p id="admin-msg" class="msg"></p>
+
+        <div class="admin-section">
+          <div class="setting-item">
+            <span>Open registration <span id="admin-registration-source" class="text-muted"></span></span>
+            <label class="switch">
+              <input type="checkbox" id="admin-registration">
+              <span class="slider round"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="admin-section">
+          <h4>Create an account</h4>
+          <p class="text-muted">The person gets an activation link, valid once, and chooses their password; their keys are created in their own browser.</p>
+          <div class="admin-inline">
+            <input type="text" id="admin-new-username" placeholder="username" spellcheck="false" autocomplete="off">
+            <label class="admin-check"><input type="checkbox" id="admin-new-admin"> admin</label>
+            <button id="btn-admin-invite" class="btn primary mini">Create</button>
+          </div>
+          <div id="admin-invite-result" class="hidden">
+            <label for="admin-invite-link">Activation link (shown only now)</label>
+            <input type="text" id="admin-invite-link" readonly class="share-link-input">
+            <p id="admin-invite-expiry" class="text-muted"></p>
+          </div>
+        </div>
+
+        <div class="admin-section">
+          <h4>Accounts</h4>
+          <div class="form-group">
+            <label for="admin-password">Your password (needed only to delete an account)</label>
+            <input type="password" id="admin-password" autocomplete="current-password">
+          </div>
+          <div id="admin-accounts" class="admin-list"></div>
+          <h4>Pending invitations</h4>
+          <div id="admin-invitations" class="admin-list"></div>
+        </div>
+
+        <div class="admin-section">
+          <h4>Active links</h4>
+          <p class="text-muted">Public drop links</p>
+          <div id="admin-public-links" class="admin-list"></div>
+          <p class="text-muted">One-time links</p>
+          <div id="admin-one-time-links" class="admin-list"></div>
+          <p class="text-muted">Shares</p>
+          <div id="admin-shares" class="admin-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="password-modal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
@@ -270,6 +335,6 @@
 
   <script src="crypto.js" integrity="sha256-0YEvKKaT55LR8djOFlG3KaF8UpyzuOpVVYCKWxhpZtk="></script>
   <script src="integrity.js" integrity="sha256-wsi9EK5GkbVp/lZzzmAS6PIxRWu+2l1wM7GKiT26aBQ="></script>
-  <script src="app.js" integrity="sha256-JRygu5MeNIs1MlLTM4M5FmPWqffJLGaZVQWWhsa2Xz4="></script>
+  <script src="app.js" integrity="sha256-fUXQhWGMpxbd+T2+/5Iiy87b1QECdxERvj/Ym/f19Kc="></script>
 </body>
 </html>

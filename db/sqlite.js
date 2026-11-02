@@ -131,6 +131,38 @@ if (!shareCols.find(c => c.name === 'format')) {
 if (!shareCols.find(c => c.name === 'owner_key')) {
     db.exec("ALTER TABLE shares ADD COLUMN owner_key TEXT");
 }
+// Accounts: role (user/admin), disabled by an admin, creation date (unknown for accounts created before)
+if (!userCols.find(c => c.name === 'role')) {
+    db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+}
+if (!userCols.find(c => c.name === 'disabled')) {
+    db.exec("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
+}
+if (!userCols.find(c => c.name === 'created_at')) {
+    db.exec("ALTER TABLE users ADD COLUMN created_at DATETIME");
+}
+// Settings changed at runtime by an admin (registration open or closed), and accounts created by an
+// admin: an invitation reserves the username until its holder activates it with a one-time token,
+// whose SHA-256 is all the database keeps
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS activated_invitations (
+    token_hash TEXT PRIMARY KEY,
+    activated_at DATETIME NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS invitations (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
 if (!userCols.find(c => c.name === 'server_auth_hash')) {
     // For existing users, we cannot magically compute the hash because we don't know their masterKey.
     // They will be locked out unless they re-register or we reset their accounts.
@@ -141,13 +173,122 @@ module.exports = {
     // Tables are created synchronously above
     ready: Promise.resolve(),
 
-    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000') => {
+    createUser: async (username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf = 'pbkdf2-sha256:600000', role = 'user') => {
         const id = randomUUID();
+        const now = new Date().toISOString();
         db.prepare(`
-            INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, new Date().toISOString(), kdf);
+            INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf, role, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, now, kdf, role, now);
         return id;
+    },
+
+    // An invitation's username becomes the account; the invitation is consumed exactly once, and only
+    // while it has not expired (null otherwise). Both happen in one transaction.
+    createInvitedUser: async (invitationId, tokenHash, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, kdf, role) => {
+        const id = randomUUID();
+        const now = new Date().toISOString();
+        return db.transaction(() => {
+            const used = db.prepare('DELETE FROM invitations WHERE id = ? AND username = ? AND expires_at > ?').run(invitationId, username, now).changes;
+            if (!used) return null;
+            // Remembered, so the link can say it was already used
+            db.prepare('INSERT INTO activated_invitations (token_hash, activated_at) VALUES (?, ?)').run(tokenHash, now);
+            db.prepare(`
+                INSERT INTO users (id, username, salt, public_key, encrypted_private_key, iv, server_auth_hash, last_login, kdf, role, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(id, username, salt, publicKey, encryptedPrivateKey, iv, serverAuthHash, now, kdf, role, now);
+            return id;
+        })();
+    },
+
+    // --- Administration ---
+    getSetting: async (key) => {
+        const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+        return row ? row.value : null;
+    },
+
+    setSetting: async (key, value) => {
+        db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+    },
+
+    createInvitation: async (username, role, tokenHash, expiresAt, createdBy) => {
+        const id = randomUUID();
+        db.prepare('INSERT INTO invitations (id, username, role, token_hash, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(id, username, role, tokenHash, expiresAt, createdBy || null);
+        return id;
+    },
+
+    getInvitationByTokenHash: async (tokenHash) => {
+        return db.prepare('SELECT * FROM invitations WHERE token_hash = ?').get(tokenHash);
+    },
+
+    getInvitationByUsername: async (username) => {
+        return db.prepare('SELECT * FROM invitations WHERE username = ?').get(username);
+    },
+
+    listInvitations: async () => {
+        return db.prepare('SELECT id, username, role, expires_at, created_at, created_by FROM invitations ORDER BY created_at DESC').all();
+    },
+
+    wasInvitationActivated: async (tokenHash) => {
+        return Boolean(db.prepare('SELECT 1 FROM activated_invitations WHERE token_hash = ?').get(tokenHash));
+    },
+
+    deleteInvitation: async (id) => {
+        return db.prepare('DELETE FROM invitations WHERE id = ?').run(id).changes > 0;
+    },
+
+    deleteExpiredInvitations: async () => {
+        return db.prepare('DELETE FROM invitations WHERE expires_at <= ?').run(new Date().toISOString()).changes;
+    },
+
+    // Metadata only: never keys, names, messages or contents
+    listAccounts: async () => {
+        return db.prepare(`
+            SELECT u.id, u.username, u.role, u.disabled, u.created_at, u.last_login, u.public_link_enabled,
+                (SELECT COUNT(*) FROM packages p WHERE p.user_id = u.id AND p.status = 'pending') AS packages,
+                (SELECT COUNT(*) FROM shares s WHERE s.user_id = u.id) AS shares,
+                (SELECT COUNT(*) FROM one_time_links o WHERE o.user_id = u.id AND o.is_used = 0) AS one_time_links
+            FROM users u ORDER BY u.username
+        `).all();
+    },
+
+    countActiveAdmins: async () => {
+        return db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND disabled = 0").get().n;
+    },
+
+    setUserDisabled: async (userId, disabled) => {
+        db.prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disabled ? 1 : 0, userId);
+    },
+
+    setUserRole: async (userId, role) => {
+        db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, userId);
+    },
+
+    // Rows only (the caller removes the files first): links, shares, packages and the account itself
+    deleteUserRows: async (userId) => {
+        db.transaction(() => {
+            db.prepare('DELETE FROM one_time_links WHERE user_id = ?').run(userId);
+            db.prepare('DELETE FROM shares WHERE user_id = ?').run(userId);
+            db.prepare('DELETE FROM packages WHERE user_id = ?').run(userId);
+            db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        })();
+    },
+
+    listActiveOneTimeLinks: async () => {
+        return db.prepare('SELECT o.token, o.user_id, o.created_at, u.username FROM one_time_links o JOIN users u ON u.id = o.user_id WHERE o.is_used = 0 ORDER BY o.created_at DESC').all();
+    },
+
+    listAllShares: async () => {
+        return db.prepare('SELECT s.token, s.user_id, s.size, s.max_downloads, s.download_count, s.expires_at, s.created_at, u.username FROM shares s JOIN users u ON u.id = s.user_id ORDER BY s.created_at DESC').all();
+    },
+
+    expireShare: async (token) => {
+        db.prepare('UPDATE shares SET expires_at = ? WHERE token = ?').run(new Date().toISOString(), token);
+    },
+
+    deleteOneTimeLinkByToken: async (token) => {
+        return db.prepare('DELETE FROM one_time_links WHERE token = ?').run(token).changes > 0;
     },
 
     getUserByUsername: async (username) => {
