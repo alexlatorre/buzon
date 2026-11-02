@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.0 — 2026-11-02
 
 - **Share passwords have no minimum length.** Any non-empty password is accepted, so a DNI can be used; the dashboard marks a short, simple or ID-like password as weak, because whoever has the link can guess it offline. The strength bar under the share password now fills (it read the wrong field).
 
