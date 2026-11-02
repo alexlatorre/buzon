@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Share passwords have no minimum length.** Any non-empty password is accepted, so a DNI can be used; the dashboard marks a short, simple or ID-like password as weak, because whoever has the link can guess it offline. The strength bar under the share password now fills (it read the wrong field).
+
 ## 2.2.0 — 2026-11-02
 
 - **Text-only shares.** A share without a file shares its message instead, under the same password, download limit and expiry. The text travels as the encrypted body and is marked as text only inside the sealed name, so the server stores it like any other share and needs no change; the link page shows it with a copy button.

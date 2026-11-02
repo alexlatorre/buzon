@@ -286,3 +286,36 @@ test('without a file the message is required, and a text share has the message s
     assert.equal(await uploadText('x'.repeat(CryptoUtils.DROP_V2.MAX_MESSAGE_BYTES + 1)), null);
     assert.match(owner.el('share-upload-msg').textContent, /too long/);
 });
+
+test('a weak password (a DNI) is accepted and marked as weak while typing', async () => {
+    const typed = value => {
+        owner.el('share-pw').value = value;
+        owner.el('share-pw').listeners.input[0].call(owner.el('share-pw'));
+        return !owner.el('share-pw-warning').classList.contains('hidden');
+    };
+    for (const weak of ['43966044X', 'X1234567L', '123456789012345', 'abc', 'aaaaaaaaaaaaaa']) assert.equal(typed(weak), true, weak);
+    for (const strong of [PASSWORD, 'Tr0mpeta-azul-de-Reus']) assert.equal(typed(strong), false, strong);
+    assert.equal(typed(''), false);
+    assert.match(owner.el('share-pw-fill').style.width, /^\d+%$/);
+
+    owner.el('share-file').files = [];
+    owner.el('share-pw').value = '43966044X';
+    owner.el('share-note').value = 'amb DNI';
+    owner.el('share-expiry').value = '24';
+    owner.el('share-max-dl').value = '1';
+    owner.el('share-result-link').value = '';
+    owner.el('btn-share-upload').disabled = false;
+    await owner.page.handleShareUpload();
+    const link = owner.el('share-result-link').value;
+    assert.match(link, /share\.html\?token=/, owner.el('share-upload-msg').textContent);
+    const page = await sharePage(new URL(link).searchParams.get('token'));
+    await page.unlock('43966044X');
+    assert.equal(page.el('share-text').textContent, 'amb DNI');
+
+    // An empty password is still refused
+    owner.el('share-pw').value = '';
+    owner.el('share-result-link').value = '';
+    await owner.page.handleShareUpload();
+    assert.equal(owner.el('share-result-link').value, '');
+    assert.match(owner.el('share-upload-msg').textContent, /Enter an unlock password/);
+});

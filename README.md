@@ -47,7 +47,7 @@ Live instance: **https://gallifrey.sytes.net/**
 - **Destroy Package** deletes it permanently from the server. Packages you do not destroy are deleted automatically after 30 days.
 
 ### 4. Secure file sharing
-- Click **📤 Share File**, drop a file, set an **unlock password** and, optionally, an encrypted note.
+- Click **📤 Share File**, drop a file, set an **unlock password** and, optionally, an encrypted note. Any password is accepted; a short, simple or ID-like one (a DNI, a phone number) is marked as weak, since whoever has the link can guess it offline.
 - **Text only**: leave the file out and write the message. It is shared under the same password and limits (each opening counts as a download), and the link page shows it instead of saving a file.
 - Choose an **expiry** (1 h, 24 h, 7 days, 30 days, never) and a **download limit** (1, 5, 10, 25, unlimited).
 - Send the generated link and, through a different channel, the password. The recipient decrypts the file in their browser.
@@ -121,7 +121,7 @@ Be clear about what Shadow Drop protects against:
 - **A malicious or compromised server can serve modified JavaScript** that steals your password. The integrity check makes this visible (it alerts when files change between visits and lets you compare with the [trusted hashes](#-trusted-hashes-sha-256)), but it cannot prevent it: whoever controls the server also controls `integrity.js`.
 - **The drop link fingerprint protects against a tampered API or database, not against a server that controls its own HTTP responses**: such a server can redirect the send page to a link carrying its own `#k`, which is the same power as serving modified pages. The send page shows the fingerprint in use, so a sender can compare it with the one the recipient gave them.
 - **Metadata is visible to the server**: who receives packages, when, how many files and their encrypted sizes, the sender name the sender typed, and for shares their size, limits and expiry. Share names are sealed with the file key (shares created before that change keep their name and type in clear).
-- **Offline guessing**: the salt and encrypted private key of a user, and the salt and wrapped key of a share, are available to an attacker who gets the database (or, for shares, the link). PBKDF2 with 600 000 iterations slows guessing down; a strong password is still the real protection.
+- **Offline guessing**: the salt and encrypted private key of a user, and the salt and wrapped key of a share, are available to an attacker who gets the database (or, for shares, the link). PBKDF2 with 600 000 iterations slows guessing down; a strong password is still the real protection. Share passwords have no minimum: a DNI (10^8 possible values) takes about 9 days to exhaust on a 16-core PC and far less on GPUs, and anyone who knows the recipient knows it. Use weak passwords only for content that is not sensitive.
 - **What key rotation fixes, and what it does not.** Someone with the old password and a copy of the old encrypted private key (an old backup or database dump, a past session) has the old private key; a password change alone does not stop it working. Rotation re-wraps each package's session key and each share's name key for the new key pair, but **does not change them**:
 
   | After a rotation, the old private key… | |
@@ -302,7 +302,7 @@ GitHub Actions runs the whole suite, MySQL included (against MariaDB 11.4), on N
 - **Docker**: the image now runs as uid 1000; fix volume and key permissions as described in [Docker](#-docker).
 - **Drops**: names and types are no longer stored in clear. Files stored before that change still carry them inside their JSON on disk; they disappear as those packages are destroyed or expire (30 days by default).
 - **Share format 2**: new shares are stored with `format = 2` and an `owner_key` (columns added on startup); their name is sealed and no type is stored. `GET /api/share/:token/meta` no longer returns `createdAt`, `downloadCount` or `maxDownloads` (it returns `downloadsLeft`), nor `mimeType` for format 2. Shares created before keep working.
-- **Shares**: new shares need a download proof derived from the password, so link holders cannot use up downloads; shares created before keep working without it. Share passwords now need 12 characters.
+- **Shares**: new shares need a download proof derived from the password, so link holders cannot use up downloads; shares created before keep working without it. Share passwords needed 12 characters in 2.0–2.2; since 2.3.0 any password is accepted and weak ones are marked.
 - **Drop format 2**: new drops are stored with `format = 2` (a column added on startup). Packages sent before still open; their names and files use the previous format. File bodies are now raw bytes, 28 bytes larger than the file. The 256 KB message limit now also covers the sealed file list and sender name. Do not roll back to a version before format 2 while it receives drops: an older server accepts them but stores them as format 1, and they will not open.
 - **No certificates means no start**: without `TLS=off`, the server no longer falls back to plain HTTP when it finds no certificates. Behind a TLS-terminating proxy, set `TLS=off` (with `TRUST_PROXY`).
 - **Lost database guard**: a missing database next to files of an earlier install stops the server (see [Backups](#-backups)).
@@ -340,16 +340,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `e54bea7abe952bc10ad6691abbc29074cc0181aac4819856199c2b6c45567621` |
+| `app.js` | `f61e204416870c22821e593a1fe65bd42df0c3a4253599bd18e15109e878d020` |
 | `crypto.js` | `b50573bbe4731bdaa4203bd702aa684c063ee778ad672c3fd0066b137b509c5e` |
 | `integrity.js` | `c2c8bd10ae4691b569fe5673ce6012e8f231456bbeda5d7033b18a893dba6814` |
 | `share.js` | `4661798b6e06fec2dc672662f305b490208ea5ca92427041901a658c00b8e2e5` |
 | `drop.js` | `73de54def55149b7fe57b50da92a2515000d320be5663b992706cba508180291` |
-| `style.css` | `c1fcdc5ca4ab64da5a8947a5a43ed74aeff0b6503681be92d0aa692b09713e79` |
-| `index.html` | `7f49f9d28bd23cb96653d941e1b3e5951fe49323ada14db20de084575b7a64f1` |
-| `about.html` | `ce26e321e40d67126d275565ae72c1b10c2106147e4805b6958673f9f1022622` |
-| `drop.html` | `87cbcf6107deb11f52af5ad04b36a64e03282ea975a6ffdabe5f763373b8eff6` |
-| `share.html` | `6e3b0cb203d8c799da196c2d9bcbe1b03f6385140992ada6bed20c8696d60c58` |
+| `style.css` | `45cacf7b2d6a1a9548c3fda6032627677b5624dcc9434c328a268a358445d8d8` |
+| `index.html` | `9b93c1d930f5777c726365b249d1bd0b954bbb3960cb9df7ae90aff93b63d5b7` |
+| `about.html` | `8e4f69b61567ba0a007c75253daabf92b38d6db772fbb3591abc46abed669063` |
+| `drop.html` | `6053eeef633744e427fe2b0e78dc811fb149e1b91233973e2b89e07f4507076b` |
+| `share.html` | `903498fa32ab9d24a5bf2bbfe5d8be1246307f2b451c3d5290c725e0dd34d4b8` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -369,7 +369,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 1. **Registro**: elige usuario y contraseña maestra. **Si la pierdes, nadie puede recuperar tus datos.**
 2. **Recibir**: comparte tu enlace público o genera enlaces de un solo uso (sirven para un único envío).
 3. **Leer**: los paquetes, sus mensajes y los nombres de los ficheros se descifran en tu navegador. **Destroy Package** los borra del servidor; los que no borres se eliminan solos a los 30 días.
-4. **Compartir ficheros**: 📤 Share File → arrastra el fichero, pon una contraseña y, si quieres, caducidad y límite de descargas. Envía el enlace y, por otro canal, la contraseña. Sin fichero, se comparte solo el mensaje, con la misma contraseña y límites, y la página del enlace lo muestra en vez de descargarlo. Los enlaces caducados o agotados se borran solos cada hora.
+4. **Compartir ficheros**: 📤 Share File → arrastra el fichero, pon una contraseña (se acepta cualquiera; las cortas, simples o tipo DNI se marcan como poco seguras) y, si quieres, caducidad y límite de descargas. Envía el enlace y, por otro canal, la contraseña. Sin fichero, se comparte solo el mensaje, con la misma contraseña y límites, y la página del enlace lo muestra en vez de descargarlo. Los enlaces caducados o agotados se borran solos cada hora.
 5. **Rotar claves**: 🔄 Rotate Keys sustituye tu par de claves por uno nuevo. Paquetes y shares se siguen abriendo, pero **tu enlace de envío cambia**: los que ya diste dejan de funcionar y hay que compartir el nuevo (los de un solo uso siguen valiendo si los copias otra vez). Úsalo si tu contraseña o tu clave privada cifrada han podido filtrarse, después de cambiar la contraseña.
 
 ## Seguridad
@@ -395,7 +395,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 ## Límites conocidos
 - Un servidor comprometido puede servir JavaScript modificado. La verificación de integridad lo hace visible, pero no lo puede impedir.
 - El servidor ve metadatos: cuándo recibes paquetes, cuántos ficheros y su tamaño cifrado, el nombre de remitente que escribe quien envía y, en los shares, su tamaño (el nombre va sellado; solo los shares anteriores a ese cambio lo tienen en claro).
-- Quien obtenga la base de datos (o el enlace de un share) puede intentar adivinar contraseñas sin conexión; PBKDF2 lo frena, pero la defensa real es una contraseña fuerte.
+- Quien obtenga la base de datos (o el enlace de un share) puede intentar adivinar contraseñas sin conexión; PBKDF2 lo frena, pero la defensa real es una contraseña fuerte. Un DNI como contraseña de un share se puede sacar en días con un PC y en horas con GPU, y lo sabe quien conozca a la persona.
 - Rotar las claves no cambia las claves de sesión: quien ya tenga la clave privada antigua y una copia anterior de las claves de sesión envueltas (base de datos robada, copia de seguridad o un servidor que guarde las filas viejas) puede leer esos paquetes en cuanto consiga sus ficheros, aunque sea después; destruye los paquetes al descargarlos (caducan a los 30 días), borra las copias de seguridad antiguas y, si la contraseña se ha filtrado, cámbiala antes de rotar.
 - El registro revela si un usuario existe; el login no.
 - Las sesiones viven en memoria: al reiniciar el servidor hay que volver a entrar.

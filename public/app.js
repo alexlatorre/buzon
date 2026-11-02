@@ -1621,11 +1621,17 @@ const shareStepResult = document.getElementById('share-step-result');
 const shareFooterForm = document.getElementById('share-footer-form');
 const shareUploadMsg = document.getElementById('share-upload-msg');
 const shareResultLink = document.getElementById('share-result-link');
-// Anyone holding the link gets the salt and wrapped key and can guess offline, so short passwords fall fast
-const MIN_SHARE_PASSWORD_LENGTH = 12;
 const sharePwInput = document.getElementById('share-pw');
 const sharePwStrength = document.getElementById('share-pw-strength');
 const sharePwFill = document.getElementById('share-pw-fill');
+const sharePwWarning = document.getElementById('share-pw-warning');
+
+// Anyone holding the link gets the salt and wrapped key and can guess offline. Any password is
+// accepted (the owner decides), but a short, simple or ID-like one (all digits, a DNI or NIE) is marked
+function isWeakSharePassword(pw) {
+    return pw.length < 12 || evaluatePassword(pw).score < 2
+        || /^\d+[A-Za-z]?$/.test(pw) || /^[XYZxyz]\d{7}[A-Za-z]$/.test(pw);
+}
 const shareDropArea = document.getElementById('share-drop-area');
 const shareDropText = document.getElementById('share-drop-text');
 const shareFileInput = document.getElementById('share-file');
@@ -1641,6 +1647,7 @@ function openShareModal() {
     sharePwInput.value = '';
     document.getElementById('share-note').value = '';
     sharePwStrength.classList.add('hidden');
+    sharePwWarning.classList.add('hidden');
     btnShareUpload.disabled = false;
     btnShareUpload.textContent = '🔐 Encrypt & Share';
     if (shareDropText) shareDropText.textContent = 'Click or drag a file here (or share just a message)';
@@ -1686,13 +1693,13 @@ if (shareDropArea && shareFileInput) {
 if (sharePwInput) {
     sharePwInput.addEventListener('input', function () {
         const val = this.value;
+        sharePwWarning.classList.toggle('hidden', !val || !isWeakSharePassword(val));
         if (!val) { sharePwStrength.classList.add('hidden'); return; }
         sharePwStrength.classList.remove('hidden');
         const result = evaluatePassword(val);
-        const colors = ['pw-very-weak', 'pw-weak', 'pw-fair', 'pw-strong', 'pw-very-strong'];
         const widths = [15, 35, 55, 75, 100];
-        sharePwFill.style.width = widths[result.level] + '%';
-        sharePwFill.className = 'pw-strength-fill ' + colors[result.level];
+        sharePwFill.style.width = widths[result.score] + '%';
+        sharePwFill.className = 'pw-strength-fill ' + result.level;
     });
 }
 
@@ -1727,8 +1734,8 @@ async function handleShareUpload() {
         shareUploadMsg.className = 'msg error';
         return;
     }
-    if (!password || password.length < MIN_SHARE_PASSWORD_LENGTH) {
-        shareUploadMsg.textContent = `Use at least ${MIN_SHARE_PASSWORD_LENGTH} characters: anyone with the link can try to guess the password offline.`;
+    if (!password) {
+        shareUploadMsg.textContent = 'Enter an unlock password.';
         shareUploadMsg.className = 'msg error';
         return;
     }

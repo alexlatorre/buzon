@@ -977,6 +977,13 @@ input:checked + .slider:before {
   text-align: right;
 }
 
+.pw-warning {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: #c2410c;
+}
+
 .pw-very-weak  { background: #ef4444; color: #ef4444; }
 .pw-weak       { background: #f97316; color: #f97316; }
 .pw-fair       { background: #eab308; color: #eab308; }
