@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 — 2026-11-02
 
 - **Text-only shares.** A share without a file shares its message instead, under the same password, download limit and expiry. The text travels as the encrypted body and is marked as text only inside the sealed name, so the server stores it like any other share and needs no change; the link page shows it with a copy button.
 
