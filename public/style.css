@@ -706,6 +706,16 @@ input:checked + .slider:before {
   line-height: 1.6;
 }
 
+.share-text {
+  margin: 0 0 1rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow-y: auto;
+  color: var(--text-color);
+  line-height: 1.6;
+}
+
 .attachments-box ul { list-style: none; margin-top: 0.5rem; }
 .modal-file-item {
   display: flex;

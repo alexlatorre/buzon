@@ -48,6 +48,7 @@ Live instance: **https://gallifrey.sytes.net/**
 
 ### 4. Secure file sharing
 - Click **📤 Share File**, drop a file, set an **unlock password** and, optionally, an encrypted note.
+- **Text only**: leave the file out and write the message. It is shared under the same password and limits (each opening counts as a download), and the link page shows it instead of saving a file.
 - Choose an **expiry** (1 h, 24 h, 7 days, 30 days, never) and a **download limit** (1, 5, 10, 25, unlimited).
 - Send the generated link and, through a different channel, the password. The recipient decrypts the file in their browser.
 - Expired or exhausted shares are removed from the server automatically (hourly).
@@ -79,7 +80,7 @@ Everything runs in the browser with the Web Crypto API (`window.crypto.subtle`).
 | **Login** | The browser derives the master key again and sends only `serverAuthHash = SHA-256(masterKey ‖ "SERVER_AUTH")`. The server stores `SHA-256(serverAuthHash)`, compares in constant time and returns the encrypted private key, which is decrypted in memory. |
 | **Send (drop)** | The sender's browser fetches your public key, creates a random AES-256-GCM session key, encrypts the message, **each file and each file name** with it, and wraps the session key with RSA-OAEP under its own label. Each ciphertext is bound to its role with associated data: the message seals the sender name and a list of random file ids, each name carries its file's id, and each file body (sent as raw bytes, IV ‖ ciphertext) can only be decrypted under that id. |
 | **Receive** | Your private key unwraps the session key, which decrypts message, names and files. The inbox compares the files and sender name the server lists with the sealed ones and warns about any difference. |
-| **Share** | A random AES-256-GCM key encrypts the file; a name key derived from it (HKDF) seals the file name. The file key is wrapped with `PBKDF2(share password, random salt, 600 000)`; only the name key is also wrapped with the owner's own RSA public key (its own OAEP label), so the dashboard lists shares by name while an account takeover does not expose their contents. The link page shows neither name nor type before the password, and saves the file with a neutral type. |
+| **Share** | A random AES-256-GCM key encrypts the file; a name key derived from it (HKDF) seals the file name. The file key is wrapped with `PBKDF2(share password, random salt, 600 000)`; only the name key is also wrapped with the owner's own RSA public key (its own OAEP label), so the dashboard lists shares by name while an account takeover does not expose their contents. The link page shows neither name nor type before the password, and saves the file with a neutral type. A text-only share is the same thing with the message as the body (UTF-8, padded to a multiple of 256 bytes) and `kind: "text"` sealed with the name, so the server cannot tell it from a file and the page shows it as text. |
 | **Rotate keys** | The browser generates a new RSA-4096 key pair, unwraps each pending package's session key and each format 2 share's owner name key with the current private key and wraps them again for the new public key, under the same OAEP label. File bodies, names and messages are not touched. The new private key is encrypted under the same password with a new salt. |
 
 The server never sees passwords, master keys, private keys, session keys, messages, file contents or (for drops) file names.
@@ -339,16 +340,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `7d45d085618ca716ddf93dbeff9222cbcedbd50102771111be3fd89bf7f5f4a7` |
-| `crypto.js` | `d1812f28a693e792d1f1d8ce1651b729a17c529cb3b8ea5555808a5b186966d9` |
+| `app.js` | `e54bea7abe952bc10ad6691abbc29074cc0181aac4819856199c2b6c45567621` |
+| `crypto.js` | `b50573bbe4731bdaa4203bd702aa684c063ee778ad672c3fd0066b137b509c5e` |
 | `integrity.js` | `c2c8bd10ae4691b569fe5673ce6012e8f231456bbeda5d7033b18a893dba6814` |
-| `share.js` | `162c4d9fc68d15af86b8d4f6066131c2d3e83d10d96f294518b9923bbba4cf39` |
+| `share.js` | `4661798b6e06fec2dc672662f305b490208ea5ca92427041901a658c00b8e2e5` |
 | `drop.js` | `73de54def55149b7fe57b50da92a2515000d320be5663b992706cba508180291` |
-| `style.css` | `615e951b9b3ec8e2116688fb6049b551244e368dcdd5a68713085af271832281` |
-| `index.html` | `c4e2d996f25ffa365f03696587fe8a26a858fc1e1efd487ca7cddd8fabc2addd` |
-| `about.html` | `939fceb137c6ab1972cb1c2a15e38479b1a0cff9c440ff8439fcebe9d8928db7` |
-| `drop.html` | `c7201a8e9b2da8469566ac54a20ebf8201f1b4ad9b7960ffc9b1161373bfc97e` |
-| `share.html` | `cef48c1c769b633482f0bfb775a5e45ddccc309c54c5bba394eace0ab9c31f04` |
+| `style.css` | `c1fcdc5ca4ab64da5a8947a5a43ed74aeff0b6503681be92d0aa692b09713e79` |
+| `index.html` | `7f49f9d28bd23cb96653d941e1b3e5951fe49323ada14db20de084575b7a64f1` |
+| `about.html` | `ce26e321e40d67126d275565ae72c1b10c2106147e4805b6958673f9f1022622` |
+| `drop.html` | `87cbcf6107deb11f52af5ad04b36a64e03282ea975a6ffdabe5f763373b8eff6` |
+| `share.html` | `6e3b0cb203d8c799da196c2d9bcbe1b03f6385140992ada6bed20c8696d60c58` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -368,7 +369,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 1. **Registro**: elige usuario y contraseña maestra. **Si la pierdes, nadie puede recuperar tus datos.**
 2. **Recibir**: comparte tu enlace público o genera enlaces de un solo uso (sirven para un único envío).
 3. **Leer**: los paquetes, sus mensajes y los nombres de los ficheros se descifran en tu navegador. **Destroy Package** los borra del servidor; los que no borres se eliminan solos a los 30 días.
-4. **Compartir ficheros**: 📤 Share File → arrastra el fichero, pon una contraseña y, si quieres, caducidad y límite de descargas. Envía el enlace y, por otro canal, la contraseña. Los enlaces caducados o agotados se borran solos cada hora.
+4. **Compartir ficheros**: 📤 Share File → arrastra el fichero, pon una contraseña y, si quieres, caducidad y límite de descargas. Envía el enlace y, por otro canal, la contraseña. Sin fichero, se comparte solo el mensaje, con la misma contraseña y límites, y la página del enlace lo muestra en vez de descargarlo. Los enlaces caducados o agotados se borran solos cada hora.
 5. **Rotar claves**: 🔄 Rotate Keys sustituye tu par de claves por uno nuevo. Paquetes y shares se siguen abriendo, pero **tu enlace de envío cambia**: los que ya diste dejan de funcionar y hay que compartir el nuevo (los de un solo uso siguen valiendo si los copias otra vez). Úsalo si tu contraseña o tu clave privada cifrada han podido filtrarse, después de cambiar la contraseña.
 
 ## Seguridad

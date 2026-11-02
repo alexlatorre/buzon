@@ -17,6 +17,11 @@
     const passwordInput = document.getElementById('share-password');
     const btnDownload = document.getElementById('btn-share-download');
     const msgEl = document.getElementById('share-msg');
+    const successTitleEl = document.getElementById('share-success-title');
+    const successTextEl = document.getElementById('share-success-text');
+    const textBoxEl = document.getElementById('share-text-box');
+    const textEl = document.getElementById('share-text');
+    const btnCopyText = document.getElementById('btn-copy-share-text');
 
     let shareMeta = null;
 
@@ -105,7 +110,7 @@
             shareMeta = data;
 
             // Show file info (format 2: the name is sealed until the password is entered)
-            filenameEl.textContent = Number(data.format) === 2 ? 'Encrypted file (name shown after unlocking)' : data.originalName;
+            filenameEl.textContent = Number(data.format) === 2 ? 'Encrypted file or message (shown after unlocking)' : data.originalName;
             filesizeEl.textContent = formatSize(data.size);
 
             // Show limits info
@@ -157,7 +162,7 @@
                 fileKeyRaw = await decryptAES(derivedKey, shareMeta.encryptedFileKey, shareMeta.keyIv);
             } catch (e) {
                 btnDownload.disabled = false;
-                btnDownload.textContent = '🔓 Decrypt & Download';
+                btnDownload.textContent = '🔓 Decrypt & Open';
                 return showMsg('Wrong password.', 'error');
             }
 
@@ -201,21 +206,30 @@
                 }
             }
 
-            // 7. Trigger download. Format 2: name sealed with a key derived from the file key. Always a
-            // neutral type and a cleaned name, so the browser never renders the file itself (a server
-            // relabelling a share as format 1 gets no more than that)
+            // 7. Format 2: name and kind sealed with a key derived from the file key. A text-only share is
+            // shown as text (textContent), not saved
             const v2 = Number(shareMeta.format) === 2;
-            const fileName = v2 ? await CryptoUtils.openShareName(fileKeyRaw, shareMeta.originalName) : CryptoUtils.cleanFileName(String(shareMeta.originalName || 'file'));
-            if (v2) filenameEl.textContent = fileName;
-            const blob = new Blob([decryptedBuffer], { type: 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
+            const info = v2 ? await CryptoUtils.openShareInfo(fileKeyRaw, shareMeta.originalName) : { name: CryptoUtils.cleanFileName(String(shareMeta.originalName || 'file')), kind: 'file' };
+            if (info.kind === 'text') {
+                filenameEl.textContent = 'Message';
+                textEl.textContent = CryptoUtils.decodeShareText(decryptedBuffer);
+                textBoxEl.classList.remove('hidden');
+                successTitleEl.textContent = 'Message Decrypted';
+                successTextEl.textContent = 'This is the message that was shared with you.';
+            } else {
+                // Always a neutral type and a cleaned name, so the browser never renders the file itself
+                // (a server relabelling a share as format 1 gets no more than that)
+                if (v2) filenameEl.textContent = info.name;
+                const blob = new Blob([decryptedBuffer], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = info.name;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            }
 
             // Show success
             formEl.classList.add('hidden');
@@ -225,12 +239,19 @@
             console.error('Download error:', error);
             showMsg(error.message || 'Error decrypting the file.', 'error');
             btnDownload.disabled = false;
-            btnDownload.textContent = '🔓 Decrypt & Download';
+            btnDownload.textContent = '🔓 Decrypt & Open';
         }
+    }
+
+    function copyText() {
+        navigator.clipboard.writeText(textEl.textContent)
+            .then(() => { btnCopyText.textContent = '✓ Copied'; setTimeout(() => { btnCopyText.textContent = '📋 Copy'; }, 1500); })
+            .catch(() => { btnCopyText.textContent = 'Could not copy'; });
     }
 
     // Event listeners
     btnDownload.addEventListener('click', handleDownload);
+    btnCopyText.addEventListener('click', copyText);
     passwordInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') handleDownload();
     });

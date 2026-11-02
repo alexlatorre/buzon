@@ -774,7 +774,8 @@ function renderShares(shares) {
         name.className = 'share-item-name';
         name.textContent = Number(s.format) === 2 ? '…' : s.original_name;
         if (Number(s.format) === 2) {
-            CryptoUtils.ownerShareName(currentUser.privateKey, s.owner_key, s.original_name).then(n => { name.textContent = n; });
+            CryptoUtils.ownerShareInfo(currentUser.privateKey, s.owner_key, s.original_name)
+                .then(info => { name.textContent = info.kind === 'text' ? '📝 Text message' : info.name; });
         }
         const meta = document.createElement('div');
         meta.className = 'share-item-meta';
@@ -1642,7 +1643,7 @@ function openShareModal() {
     sharePwStrength.classList.add('hidden');
     btnShareUpload.disabled = false;
     btnShareUpload.textContent = '🔐 Encrypt & Share';
-    if (shareDropText) shareDropText.textContent = 'Click or drag a file here';
+    if (shareDropText) shareDropText.textContent = 'Click or drag a file here (or share just a message)';
     if (shareDropArea) shareDropArea.classList.remove('drop-active');
     // Close sidebar on mobile
     if (sidebar && sidebar.classList.contains('sidebar-open')) toggleSidebar();
@@ -1709,12 +1710,20 @@ if (shareModal) {
 async function handleShareUpload() {
     const fileInput = document.getElementById('share-file');
     const password = sharePwInput.value;
-    const note = document.getElementById('share-note').value.trim();
+    const rawNote = document.getElementById('share-note').value;
+    const note = rawNote.trim();
     const expiresIn = document.getElementById('share-expiry').value;
     const maxDownloads = document.getElementById('share-max-dl').value;
 
-    if (!fileInput.files || !fileInput.files.length) {
-        shareUploadMsg.textContent = 'Please select a file.';
+    // Without a file the message itself is what is shared (a text-only share), under the same password and limits
+    const textOnly = !fileInput.files || !fileInput.files.length;
+    if (textOnly && !note) {
+        shareUploadMsg.textContent = 'Select a file or write a message.';
+        shareUploadMsg.className = 'msg error';
+        return;
+    }
+    if (textOnly && new TextEncoder().encode(rawNote).length > CryptoUtils.DROP_V2.MAX_MESSAGE_BYTES) {
+        shareUploadMsg.textContent = 'The message is too long.';
         shareUploadMsg.className = 'msg error';
         return;
     }
@@ -1730,15 +1739,15 @@ async function handleShareUpload() {
         return;
     }
 
-    const file = fileInput.files[0];
+    const file = textOnly ? null : fileInput.files[0];
     btnShareUpload.disabled = true;
     shareUploadMsg.className = 'msg info';
 
     sharesUploading++;
     try {
-        // 1. Read file
+        // 1. Read file (or the message as written, for a text-only share)
         btnShareUpload.textContent = '📖 Reading file...';
-        const fileBuffer = await file.arrayBuffer();
+        const fileBuffer = textOnly ? CryptoUtils.encodeShareText(rawNote) : await file.arrayBuffer();
 
         // 2. Generate AES key and encrypt file
         btnShareUpload.textContent = '🔒 Encrypting file...';
@@ -1768,7 +1777,7 @@ async function handleShareUpload() {
         // 5. Encrypt message if present
         let encryptedMessage = null;
         let messageIv = null;
-        if (note) {
+        if (note && !textOnly) {
             const enc = new TextEncoder();
             const msgResult = await CryptoUtils.encryptSymmetric(derivedKey, enc.encode(note));
             encryptedMessage = msgResult.ciphertext;
@@ -1787,7 +1796,9 @@ async function handleShareUpload() {
         // Format 2: the name is sealed with a key derived from the file key, and the owner keeps only
         // that name key, wrapped with their own public key, to list the share by name. No type is sent.
         formData.append('format', '2');
-        formData.append('originalName', await CryptoUtils.sealShareName(rawKey, file.name));
+        formData.append('originalName', textOnly
+            ? await CryptoUtils.sealShareName(rawKey, 'message.txt', 'text')
+            : await CryptoUtils.sealShareName(rawKey, file.name));
         formData.append('ownerKey', await CryptoUtils.wrapShareNameKeyForOwner(currentUser.publicKey, rawKey));
         formData.append('maxDownloads', maxDownloads);
         formData.append('expiresIn', expiresIn);

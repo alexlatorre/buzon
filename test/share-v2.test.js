@@ -211,3 +211,78 @@ test('format 2 shares must carry a sealed name and an owner key, and no type', a
     }
     assert.equal((await api.share(owner.page.user.id, token, { fields: { format: '2', originalName: sealed, mimeType: undefined, ownerKey } })).status, 200);
 });
+
+// Text-only shares: no file, the message is the body, shown on the page instead of saved
+const TEXT = 'Hola Marta,\nla clau del wifi és «sol-de-tarda» 🌅\n';
+
+async function uploadText(note, maxDownloads = '2') {
+    owner.el('share-file').files = [];
+    owner.el('share-pw').value = PASSWORD;
+    owner.el('share-note').value = note;
+    owner.el('share-expiry').value = '0';
+    owner.el('share-max-dl').value = maxDownloads;
+    owner.el('share-result-link').value = '';
+    owner.el('btn-share-upload').disabled = false;
+    await owner.page.handleShareUpload();
+    const link = owner.el('share-result-link').value;
+    return link ? new URL(link).searchParams.get('token') : null;
+}
+
+test('the kind is sealed with the name: only "text" makes a text share', async () => {
+    const raw = rawKey();
+    assert.deepEqual(await CryptoUtils.openShareInfo(raw, await CryptoUtils.sealShareName(raw, 'message.txt', 'text')), { name: 'message.txt', kind: 'text' });
+    assert.deepEqual(await CryptoUtils.openShareInfo(raw, await CryptoUtils.sealShareName(raw, NAME)), { name: NAME, kind: 'file' });
+    assert.deepEqual(await CryptoUtils.openShareInfo(raw, await CryptoUtils.sealShareName(raw, 'a', 'html')), { name: 'a', kind: 'file' });
+    assert.deepEqual(await CryptoUtils.openShareInfo(rawKey(), await CryptoUtils.sealShareName(raw, 'message.txt', 'text')), { name: 'encrypted-file', kind: 'file' });
+    // The text body is padded and comes back exactly
+    const body = CryptoUtils.encodeShareText(TEXT);
+    assert.equal(body.length % 256, 0);
+    assert.equal(CryptoUtils.decodeShareText(body), TEXT);
+});
+
+test('a message without a file is shared as text, counted like a download', async () => {
+    const token = await uploadText(TEXT);
+    assert.ok(token, owner.el('share-upload-msg').textContent);
+
+    // The server holds a padded body and no separate message; nothing says it is text
+    const db = new Database(path.join(server.dataDir, 'buzon.db'), { readonly: true });
+    const row = db.prepare('SELECT * FROM shares WHERE token = ?').get(token);
+    db.close();
+    assert.equal(row.format, 2);
+    assert.equal(row.encrypted_message, null);
+    assert.equal(row.size, 256 + 16);
+    const stored = fs.readFileSync(path.join(server.dataDir, 'shares', `${token}.enc`));
+    assert.equal(stored.includes(Buffer.from('wifi')), false);
+
+    const page = await sharePage(token);
+    assert.equal((await page.unlock('wrong password here')).blob, undefined);
+    assert.equal(page.el('share-text').textContent, '');
+    page.el('share-text-box').classList.add('hidden');
+    const opened = await page.unlock(PASSWORD);
+    assert.equal(opened.name, undefined, 'a text share is not saved as a file');
+    assert.equal(opened.blob, undefined);
+    assert.equal(page.el('share-text').textContent, TEXT);
+    assert.equal(page.el('share-text-box').classList.contains('hidden'), false);
+    assert.equal(page.el('share-success').classList.contains('hidden'), false);
+    assert.equal((await api.json('GET', `/api/share/${token}/meta`)).data.downloadsLeft, 1);
+
+    // The owner sees it as a text message
+    await owner.page.fetchShares();
+    await settle();
+    const names = owner.el('share-list').children.map(item => item.children[0].children[0].textContent);
+    assert.ok(names.includes('📝 Text message'), JSON.stringify(names));
+});
+
+test('a text share stops opening at its limit', async () => {
+    const token = await uploadText('una sola vez', '1');
+    assert.equal((await sharePage(token).then(p => p.unlock(PASSWORD).then(() => p.el('share-text').textContent))), 'una sola vez');
+    const again = await sharePage(token);
+    assert.match(again.el('share-error-msg').textContent, /limit/i);
+});
+
+test('without a file the message is required, and a text share has the message size limit', async () => {
+    assert.equal(await uploadText(''), null);
+    assert.match(owner.el('share-upload-msg').textContent, /file or write a message/);
+    assert.equal(await uploadText('x'.repeat(CryptoUtils.DROP_V2.MAX_MESSAGE_BYTES + 1)), null);
+    assert.match(owner.el('share-upload-msg').textContent, /too long/);
+});

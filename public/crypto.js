@@ -556,28 +556,50 @@ const CryptoUtils = {
         return window.crypto.subtle.importKey("raw", rawNameKey, { name: "AES-GCM" }, false, usages);
     },
 
-    sealShareName: async function (rawFileKey, name) {
+    // kind "text": a text-only share, whose body is the text (UTF-8, zero-padded to 256 bytes) and which
+    // the link page shows instead of saving. The kind is sealed with the name, so the server can neither
+    // tell a text from a file nor turn one into the other
+    sealShareName: async function (rawFileKey, name, kind) {
         const nameKey = await this.importShareNameKey(await this.shareNameKeyBytes(rawFileKey), ["encrypt"]);
+        const fields = kind === "text" ? { name, kind } : { name };
         const sealed = await this.aesGcmEncrypt(nameKey,
-            this.padTo256(new TextEncoder().encode(JSON.stringify({ name }))), this.SHARE_V2.NAME);
+            this.padTo256(new TextEncoder().encode(JSON.stringify(fields))), this.SHARE_V2.NAME);
         return `enc2:${this.bufferToBase64(sealed.iv)}:${this.bufferToBase64(sealed.ciphertext)}`;
     },
 
-    // The sealed name, or "encrypted-file" when it does not open with this name key
-    openSealedShareName: async function (nameKey, sealed) {
+    // The sealed name and kind ("file" or "text"), or "encrypted-file" when it does not open with this name key
+    openSealedShareInfo: async function (nameKey, sealed) {
         const match = /^enc2:([A-Za-z0-9+/]+=*):([A-Za-z0-9+/]+=*)$/.exec(String(sealed || ""));
         try {
             const plain = await this.aesGcmDecrypt(nameKey, this.base64ToBuffer(match[1]),
                 this.base64ToBuffer(match[2]), this.SHARE_V2.NAME);
-            return this.cleanFileName(String(JSON.parse(new TextDecoder().decode(plain).replace(/\0+$/, "")).name));
+            const fields = JSON.parse(new TextDecoder().decode(plain).replace(/\0+$/, ""));
+            return { name: this.cleanFileName(String(fields.name)), kind: fields.kind === "text" ? "text" : "file" };
         } catch (e) {
-            return "encrypted-file";
+            return { name: "encrypted-file", kind: "file" };
         }
     },
 
-    // Link side, after the password: the name from the raw file key
+    openSealedShareName: async function (nameKey, sealed) {
+        return (await this.openSealedShareInfo(nameKey, sealed)).name;
+    },
+
+    // Link side, after the password: the name and kind from the raw file key
+    openShareInfo: async function (rawFileKey, sealed) {
+        return this.openSealedShareInfo(await this.importShareNameKey(await this.shareNameKeyBytes(rawFileKey), ["decrypt"]), sealed);
+    },
+
     openShareName: async function (rawFileKey, sealed) {
-        return this.openSealedShareName(await this.importShareNameKey(await this.shareNameKeyBytes(rawFileKey), ["decrypt"]), sealed);
+        return (await this.openShareInfo(rawFileKey, sealed)).name;
+    },
+
+    // Body of a text-only share and back: the padding hides the exact length
+    encodeShareText: function (text) {
+        return this.padTo256(new TextEncoder().encode(text));
+    },
+
+    decodeShareText: function (buffer) {
+        return new TextDecoder().decode(buffer).replace(/\0+$/, "");
     },
 
     // RSA-OAEP parameters of the owner's copy of a share's name key
@@ -590,14 +612,18 @@ const CryptoUtils = {
         return this.bufferToBase64(wrapped);
     },
 
-    // Owner side: the name of one of their format 2 shares
-    ownerShareName: async function (privateKey, wrappedNameKey, sealed) {
+    // Owner side: the name and kind of one of their format 2 shares
+    ownerShareInfo: async function (privateKey, wrappedNameKey, sealed) {
         try {
             const raw = await window.crypto.subtle.decrypt(this.ownerKeyParams(), privateKey, this.base64ToBuffer(wrappedNameKey));
-            return this.openSealedShareName(await this.importShareNameKey(raw, ["decrypt"]), sealed);
+            return this.openSealedShareInfo(await this.importShareNameKey(raw, ["decrypt"]), sealed);
         } catch (e) {
-            return "encrypted-file";
+            return { name: "encrypted-file", kind: "file" };
         }
+    },
+
+    ownerShareName: async function (privateKey, wrappedNameKey, sealed) {
+        return (await this.ownerShareInfo(privateKey, wrappedNameKey, sealed)).name;
     },
 
     // --- Key rotation ---

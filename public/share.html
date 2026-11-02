@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shadow Drop | Secure Download</title>
-  <link rel="stylesheet" href="style.css" integrity="sha256-YV6VG5s+yOIRZoj7YEm1USRONo3N1aaHEwha8nGDIoE=">
+  <link rel="stylesheet" href="style.css" integrity="sha256-wfzcXKSrZNpaiUelpD7XSu/wtlA2gb6S0KppKwlxPnk=">
 </head>
 <body>
   <div class="auth-wrapper active">
@@ -43,15 +43,20 @@
           <input type="password" id="share-password" placeholder="Enter the unlock password" autocomplete="new-password">
         </div>
 
-        <button id="btn-share-download" class="btn primary full-width">🔓 Decrypt & Download</button>
+        <button id="btn-share-download" class="btn primary full-width">🔓 Decrypt & Open</button>
         <div id="share-msg" class="msg"></div>
       </div>
 
       <!-- Success State -->
       <div id="share-success" class="panel hidden" style="text-align:center;">
         <div style="font-size:3rem; margin-bottom:1rem;">✅</div>
-        <h2 style="margin-bottom:0.5rem;">Download Complete</h2>
-        <p class="text-muted">The file has been decrypted and downloaded successfully.</p>
+        <h2 id="share-success-title" style="margin-bottom:0.5rem;">Download Complete</h2>
+        <p id="share-success-text" class="text-muted">The file has been decrypted and downloaded successfully.</p>
+        <!-- A text-only share: the text itself, shown instead of a download -->
+        <div id="share-text-box" class="message-box hidden" style="text-align:left; margin-top:1.5rem;">
+          <p id="share-text" class="share-text"></p>
+          <button id="btn-copy-share-text" class="btn primary">📋 Copy</button>
+        </div>
         <!-- Outside the form, which is hidden once the download starts -->
         <div id="share-message-box" class="message-box hidden" style="text-align:left; margin-top:1.5rem;">
           <h4>Message from sender</h4>
@@ -61,7 +66,7 @@
     </div>
   </div>
 
-  <script src="crypto.js" integrity="sha256-0YEvKKaT55LR8djOFlG3KaF8UpyzuOpVVYCKWxhpZtk="></script>
-  <script src="share.js" integrity="sha256-FixNn8aNFa+GuNT2BmExwtPoPRDZbylFGLmSO7ukzzk="></script>
+  <script src="crypto.js" integrity="sha256-tQVzu+RzG9qkIDvXAqpoTAY+53itZyw/0AZrE3tQnF4="></script>
+  <script src="share.js" integrity="sha256-RmF5i24G/sLcZyZi8wW0kCCOpcqSQnBBkBpljAC44uU="></script>
 </body>
 </html>
