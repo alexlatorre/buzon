@@ -105,6 +105,15 @@ async function registrationOpen() {
 // handed to the person) lets its holder pick a password and create the keys in their own browser.
 // Only the token's SHA-256 is stored, so a copy of the database cannot activate anything.
 const INVITATION_TTL_HOURS = Number(process.env.INVITATION_TTL_HOURS) || 72;
+
+// Largest file a share accepts, in MB. Shares are encrypted and decrypted whole in the browser's memory
+// (the sender's and the recipient's), so a larger limit costs RAM on both sides
+const SHARE_MAX_FILE_MB = process.env.SHARE_MAX_FILE_MB === undefined || process.env.SHARE_MAX_FILE_MB === '' ? 200 : Number(process.env.SHARE_MAX_FILE_MB);
+if (!Number.isInteger(SHARE_MAX_FILE_MB) || SHARE_MAX_FILE_MB < 1 || SHARE_MAX_FILE_MB > 1024) {
+    console.error(`SHARE_MAX_FILE_MB must be a whole number of MB between 1 and 1024, not "${process.env.SHARE_MAX_FILE_MB}".`);
+    process.exit(1);
+}
+const SHARE_MAX_FILE_BYTES = SHARE_MAX_FILE_MB * 1024 * 1024;
 const { newInvitationToken, invitationTokenHash, isInvitationToken } = require('./invitations');
 const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,32}$/;
 
@@ -662,7 +671,7 @@ app.post('/api/auth/register', async (req, res) => {
 // What the login page needs before anyone logs in
 app.get('/api/config', async (req, res) => {
     try {
-        res.json({ registrationOpen: await registrationOpen() });
+        res.json({ registrationOpen: await registrationOpen(), shareMaxFileBytes: SHARE_MAX_FILE_BYTES });
     } catch (error) {
         console.error('Config error:', error);
         res.status(500).json({ error: 'Server error' });
@@ -1184,7 +1193,8 @@ const shareStorage = multer.diskStorage({
         cb(null, uniqueName);
     }
 });
-const shareUpload = multer({ storage: shareStorage, limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 20, fieldSize: MAX_FIELD_SIZE } }); // 100MB max
+// The stored body is the file plus its 16-byte AES-GCM tag
+const shareUpload = multer({ storage: shareStorage, limits: { fileSize: SHARE_MAX_FILE_BYTES + 16, files: 1, fields: 20, fieldSize: MAX_FIELD_SIZE } });
 
 // 8. Create Share (Upload encrypted file)
 // Runs before multer: ownership, declared size and quota, so nothing is written for a refused share

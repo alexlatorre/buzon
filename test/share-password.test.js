@@ -20,5 +20,5 @@ test('the share password field asks for a new password and sets no minimum', () 
     const field = html.match(/<input[^>]*id="share-pw"[^>]*>/)[0];
     assert.match(field, /autocomplete="new-password"/);
     assert.doesNotMatch(field, /minlength/);
-    assert.match(html, /id="share-pw-warning" class="pw-warning hidden"/);
+    assert.match(html, /id="share-pw-warning" class="field-warning hidden"/);
 });

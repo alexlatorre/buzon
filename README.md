@@ -97,7 +97,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Strict CSP and headers**: `script-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, HSTS, `nosniff`, `no-referrer`, `no-store`, no CORS.
 - **Untrusted data rendered as text**: sender names and file names never go through `innerHTML`.
 - **Rate limiting**: auth (20 / 15 min), uploads (50 / 15 min) and API (200 / 15 min) per IP. `X-Forwarded-For` is only trusted when a proxy is declared (`TRUST_PROXY`, or `TLS=off`).
-- **Upload hardening**: drop links and quota are checked **before** anything is written to disk; at most 20 files × 50 MB per drop and 1 file × 100 MB per share; multer errors are returned as JSON.
+- **Upload hardening**: drop links and quota are checked **before** anything is written to disk; at most 20 files × 50 MB per drop and 1 file of `SHARE_MAX_FILE_MB` (200 MB by default) per share; multer errors are returned as JSON.
 - **Race-free limits**: one-time links and download limits are enforced with atomic conditional updates.
 - **Quotas**: drops and shares share a 500 MB per-user quota.
 - **Path traversal protection**: every ID in the API is validated as a UUID and stored files are named by the server.
@@ -178,6 +178,7 @@ All settings are environment variables; nothing secret lives in the repository.
 | `REQUEST_TIMEOUT_MS` | `1800000` (30 min) | Time allowed for a whole request; raise it for very large uploads over slow links. |
 | `REGISTRATION` | `open` | `closed` turns off self-registration: only admin-created accounts (activation links) can be created. An admin can switch it at runtime; that choice, kept in the database, then wins over this value. |
 | `INVITATION_TTL_HOURS` | `72` | How long an activation link for an admin-created account stays valid. |
+| `SHARE_MAX_FILE_MB` | `200` | Largest file a share accepts, in MB (1–1024). Shares are encrypted and decrypted whole in the browser's memory, so the dashboard and the link page warn past 50 MB. A reverse proxy in front must allow bodies this large (`client_max_body_size`). |
 | `PACKAGE_RETENTION_DAYS` | `30` | Pending packages older than this are deleted with their files by the hourly cleanup; `0` keeps them until the owner destroys them. |
 | `ORPHAN_GRACE_MS` | `3600000` (1 h) | Age after which upload files with no database row are deleted by the hourly cleanup. |
 
@@ -265,7 +266,7 @@ GitHub Actions runs the whole suite, MySQL included (against MariaDB 11.4), on N
 | `POST` | `/api/auth/rotate-keys/challenge` | ✔ | A nonce encrypted to the account's current public key (label `shadowdrop/rotation-challenge/v1`), for one rotation attempt. |
 | `POST` | `/api/auth/rotate-keys` | ✔ | Rotate keys: the current password's auth hash, `challengeId` and `challengeResponse` (SHA-256 of `shadowdrop/rotation-response/v1` ‖ nonce), the new public key (2048, 3072 or 4096 bits) and vault (`salt`, which must be new, `kdf`, `encryptedPrivateKey`, `iv`, `serverAuthHash`), and `packages: [{ id, encryptedSessionKey }]` and `shares: [{ token, ownerKey }]` naming every pending package and format 2 share (`null` keeps a key as it is). 403 for a wrong password, 403 with `code: "key-proof"` for a missing or wrong answer, 409 with `code: "lists-changed"` when the lists do not match, 409 without a code when the password changed meanwhile. Ends the account's other sessions. |
 | `POST` | `/api/auth/logout` | ✔ | End the session. |
-| `GET` | `/api/config` | – | `{ registrationOpen }` for the login page. |
+| `GET` | `/api/config` | – | `{ registrationOpen, shareMaxFileBytes }` for the login page and the share form. |
 | `POST` | `/api/auth/invitation` | – | `{ token }` → the username an activation link is for. Activation itself is `POST /api/auth/register` with `invitationToken`. |
 | `GET` | `/api/admin/overview` | admin | Registration state, accounts (metadata only) and pending invitations. |
 | `POST` | `/api/admin/registration` | admin | `{ open }`: switch self-registration. |
@@ -340,16 +341,16 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `f61e204416870c22821e593a1fe65bd42df0c3a4253599bd18e15109e878d020` |
+| `app.js` | `bb42bdf538c47931559d83ab096fb2fc21b5bafb96f5883a8c103f9bb9ef1d92` |
 | `crypto.js` | `b50573bbe4731bdaa4203bd702aa684c063ee778ad672c3fd0066b137b509c5e` |
 | `integrity.js` | `c2c8bd10ae4691b569fe5673ce6012e8f231456bbeda5d7033b18a893dba6814` |
-| `share.js` | `4661798b6e06fec2dc672662f305b490208ea5ca92427041901a658c00b8e2e5` |
+| `share.js` | `480ff624800f95f72260be396bb07ee5e52fc193d4e932355226932315dfca2e` |
 | `drop.js` | `73de54def55149b7fe57b50da92a2515000d320be5663b992706cba508180291` |
-| `style.css` | `45cacf7b2d6a1a9548c3fda6032627677b5624dcc9434c328a268a358445d8d8` |
-| `index.html` | `9b93c1d930f5777c726365b249d1bd0b954bbb3960cb9df7ae90aff93b63d5b7` |
-| `about.html` | `8e4f69b61567ba0a007c75253daabf92b38d6db772fbb3591abc46abed669063` |
-| `drop.html` | `6053eeef633744e427fe2b0e78dc811fb149e1b91233973e2b89e07f4507076b` |
-| `share.html` | `903498fa32ab9d24a5bf2bbfe5d8be1246307f2b451c3d5290c725e0dd34d4b8` |
+| `style.css` | `268ad481133fb31e5096e3c82700d909d43b1e300cb9d9bd4e75558b290b632e` |
+| `index.html` | `dbaf98e1587a9ac12cc9bc8b1d7c0a0e9d5cfa13d611c74768e7399ac3fabf7c` |
+| `about.html` | `744d21d1e0c0d439c8fd2fa8f935525d32469e5fdcea070a2e47914a85a4d55c` |
+| `drop.html` | `69fe40eb3794a3848575f7a8e28621273f6cea9eb97466d7973792839eb977f2` |
+| `share.html` | `67e72dbce2e998542eb7898a49c895c5b493ebd583e8490e7fb7d904bbaf28b2` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -386,7 +387,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 - **Sesiones** con token `Bearer` de 24 h y comprobación de propietario en paquetes, ficheros, shares y enlaces.
 - **CSP estricta y cabeceras** (HSTS, `nosniff`, `no-referrer`, sin iframes, sin CORS). Los nombres de remitente y de fichero se pintan siempre como texto.
 - **Límites de peticiones** por IP; `X-Forwarded-For` solo se tiene en cuenta si se configura `TRUST_PROXY`.
-- **Subidas protegidas**: enlace y cuota se comprueban antes de escribir en disco; máximo 20 ficheros de 50 MB por envío y 1 de 100 MB por share.
+- **Subidas protegidas**: enlace y cuota se comprueban antes de escribir en disco; máximo 20 ficheros de 50 MB por envío y 1 de `SHARE_MAX_FILE_MB` (200 MB por defecto) por share; a partir de 50 MB el panel y la página del enlace avisan de que el navegador necesitará mucha memoria.
 - **Límites sin condiciones de carrera** en enlaces de un solo uso y en descargas.
 - **Cuota** de 500 MB por usuario para envíos y shares juntos.
 - **Verificación de integridad** de los 10 ficheros del frontend.

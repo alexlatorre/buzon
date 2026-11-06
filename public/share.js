@@ -22,6 +22,10 @@
     const textBoxEl = document.getElementById('share-text-box');
     const textEl = document.getElementById('share-text');
     const btnCopyText = document.getElementById('btn-copy-share-text');
+    const sizeWarningEl = document.getElementById('share-size-warning');
+
+    // The file is decrypted whole in memory: past this size the page warns before the password
+    const LARGE_SHARE_BYTES = 50 * 1024 * 1024;
 
     let shareMeta = null;
 
@@ -112,6 +116,7 @@
             // Show file info (format 2: the name is sealed until the password is entered)
             filenameEl.textContent = Number(data.format) === 2 ? 'Encrypted file or message (shown after unlocking)' : data.originalName;
             filesizeEl.textContent = formatSize(data.size);
+            if (data.size > LARGE_SHARE_BYTES) sizeWarningEl.classList.remove('hidden');
 
             // Show limits info
             let limitsHtml = '';

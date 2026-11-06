@@ -203,7 +203,7 @@ test('accounts and administration work on MySQL', { skip }, async () => {
     const overview = (await api.json('GET', '/api/admin/overview', null, t)).data;
     assert.ok(overview.accounts.some(a => a.username === 'alice' && a.role === 'user'));
     assert.equal((await api.json('POST', '/api/admin/registration', { open: false }, t)).status, 200);
-    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: false });
+    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: false, shareMaxFileBytes: 200 * 1024 * 1024 });
     assert.equal((await api.json('POST', '/api/admin/registration', { open: true }, t)).status, 200);
     const { user } = await api.register('mysql_gone', 'gone password');
     assert.equal((await api.json('POST', `/api/admin/accounts/${user.id}`, { disabled: true }, t)).status, 200);

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Larger shares, configurable.** A share accepts one file of up to `SHARE_MAX_FILE_MB` (200 MB by default, was a fixed 100 MB). `GET /api/config` also returns `shareMaxFileBytes`, so the dashboard refuses a larger file before encrypting it. Past 50 MB the dashboard and the link page warn that the browser holds the whole file in memory.
+
 ## 2.3.0 — 2026-11-02
 
 - **Share passwords have no minimum length.** Any non-empty password is accepted, so a DNI can be used; the dashboard marks a short, simple or ID-like password as weak, because whoever has the link can guess it offline. The strength bar under the share password now fills (it read the wrong field).

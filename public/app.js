@@ -1292,6 +1292,8 @@ btnCopyRotate.addEventListener('click', () => {
 // logs. The page shows the username, takes the token out of the address bar, and registration then
 // creates the keys here and sends the token along.
 let activationToken = null;
+// Largest share file the server accepts (bytes), from /api/config; null until known (the server checks anyway)
+let shareMaxFileBytes = null;
 
 async function initAuthOptions() {
     const match = /^#activate=([A-Za-z0-9_-]{43})$/.exec(window.location.hash || '');
@@ -1300,6 +1302,7 @@ async function initAuthOptions() {
         const res = await fetch('/api/config');
         const config = await res.json();
         btnRegister.classList.toggle('hidden', res.ok && config.registrationOpen === false);
+        if (res.ok && Number.isInteger(config.shareMaxFileBytes)) shareMaxFileBytes = config.shareMaxFileBytes;
     } catch (e) {
         // Keep the button: the server refuses registration anyway when it is closed
     }
@@ -1635,6 +1638,24 @@ function isWeakSharePassword(pw) {
 const shareDropArea = document.getElementById('share-drop-area');
 const shareDropText = document.getElementById('share-drop-text');
 const shareFileInput = document.getElementById('share-file');
+const shareSizeWarning = document.getElementById('share-size-warning');
+
+// A share is encrypted whole in this browser's memory (and decrypted whole in the recipient's), so past
+// this size it is marked as heavy. The server's limit (SHARE_MAX_FILE_MB) comes from /api/config.
+const LARGE_SHARE_BYTES = 50 * 1024 * 1024;
+
+function shareTooLargeMessage(file) {
+    if (!shareMaxFileBytes || file.size <= shareMaxFileBytes) return null;
+    return `This file is ${(file.size / 1048576).toFixed(1)} MB; shares accept up to ${Math.round(shareMaxFileBytes / 1048576)} MB.`;
+}
+
+function showShareFile(file) {
+    shareDropText.textContent = '📎 ' + file.name;
+    const tooLarge = shareTooLargeMessage(file);
+    shareUploadMsg.textContent = tooLarge || '';
+    shareUploadMsg.className = tooLarge ? 'msg error' : 'msg';
+    shareSizeWarning.classList.toggle('hidden', Boolean(tooLarge) || file.size <= LARGE_SHARE_BYTES);
+}
 
 function openShareModal() {
     shareModal.classList.remove('hidden');
@@ -1648,6 +1669,7 @@ function openShareModal() {
     document.getElementById('share-note').value = '';
     sharePwStrength.classList.add('hidden');
     sharePwWarning.classList.add('hidden');
+    shareSizeWarning.classList.add('hidden');
     btnShareUpload.disabled = false;
     btnShareUpload.textContent = '🔐 Encrypt & Share';
     if (shareDropText) shareDropText.textContent = 'Click or drag a file here (or share just a message)';
@@ -1678,14 +1700,12 @@ if (shareDropArea && shareFileInput) {
         shareDropArea.classList.remove('drop-active');
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             shareFileInput.files = e.dataTransfer.files;
-            shareDropText.textContent = '📎 ' + e.dataTransfer.files[0].name;
+            showShareFile(e.dataTransfer.files[0]);
         }
     });
 
     shareFileInput.addEventListener('change', () => {
-        if (shareFileInput.files.length > 0) {
-            shareDropText.textContent = '📎 ' + shareFileInput.files[0].name;
-        }
+        if (shareFileInput.files.length > 0) showShareFile(shareFileInput.files[0]);
     });
 }
 
@@ -1747,6 +1767,12 @@ async function handleShareUpload() {
     }
 
     const file = textOnly ? null : fileInput.files[0];
+    const tooLarge = file && shareTooLargeMessage(file);
+    if (tooLarge) {
+        shareUploadMsg.textContent = tooLarge;
+        shareUploadMsg.className = 'msg error';
+        return;
+    }
     btnShareUpload.disabled = true;
     shareUploadMsg.className = 'msg info';
 

@@ -977,7 +977,7 @@ input:checked + .slider:before {
   text-align: right;
 }
 
-.pw-warning {
+.field-warning {
   margin: 0.5rem 0 0 0;
   font-size: 0.8125rem;
   line-height: 1.4;

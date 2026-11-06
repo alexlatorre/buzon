@@ -50,7 +50,7 @@ before(async () => {
 after(() => server.stop());
 
 test('registration is open by default and the config says so', async () => {
-    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: true });
+    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: true, shareMaxFileBytes: 200 * 1024 * 1024 });
     assert.equal((await api.register('open_user', 'open user password')).res.status, 200);
     assert.equal((await api.login('open_user', 'open user password')).data.role, 'user');
 });
@@ -89,7 +89,7 @@ test('an expired or revoked invitation does not activate', async () => {
 
 test('with registration closed only invitations create accounts', async () => {
     assert.equal((await as('POST', '/api/admin/registration', { open: false })).status, 200);
-    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: false });
+    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: false, shareMaxFileBytes: 200 * 1024 * 1024 });
     const refused = await api.register('closed_eve', 'eve password');
     assert.equal(refused.res.status, 403);
     assert.match(refused.res.data.error, /closed/);
@@ -103,7 +103,7 @@ test('REGISTRATION=closed is the starting value, and an invalid value stops the 
     const closed = await startServer({ REGISTRATION: 'closed' });
     try {
         const closedApi = client(closed.base);
-        assert.deepEqual((await closedApi.json('GET', '/api/config')).data, { registrationOpen: false });
+        assert.deepEqual((await closedApi.json('GET', '/api/config')).data, { registrationOpen: false, shareMaxFileBytes: 200 * 1024 * 1024 });
         assert.equal((await closedApi.register('nobody_here', 'some password')).res.status, 403);
     } finally {
         await closed.stop();
@@ -125,7 +125,7 @@ test('admin routes are for admins only', async () => {
         assert.equal((await api.json(method, url, body, userToken)).status, 403, `${method} ${url} as a user`);
         assert.equal((await api.json(method, url, body)).status, 401, `${method} ${url} without a session`);
     }
-    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: true });
+    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: true, shareMaxFileBytes: 200 * 1024 * 1024 });
 });
 
 test('the overview and the link list carry no keys, hashes, names or link tokens', async () => {
@@ -240,7 +240,7 @@ test('an admin can disable public links, cancel one-time links, and expire or ca
 test('the command line lists accounts and switches registration', async () => {
     assert.match(cli('list').out, /root_admin\tadmin/);
     assert.equal(cli('registration', 'closed').status, 0);
-    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: false });
+    assert.deepEqual((await api.json('GET', '/api/config')).data, { registrationOpen: false, shareMaxFileBytes: 200 * 1024 * 1024 });
     assert.equal(cli('registration', 'open').status, 0);
     assert.notEqual(cli('invite', 'root_admin').status, 0, 'existing username');
     assert.notEqual(cli('invite', 'bad name!').status, 0);

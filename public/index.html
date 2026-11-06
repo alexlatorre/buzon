@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shadow Drop | Secured Receiver</title>
-  <link rel="stylesheet" href="style.css" integrity="sha256-RcrPey1qGpVIw/2mAyYnZ3tWJNzJQ0wyiiaKNYRF2Ng=">
+  <link rel="stylesheet" href="style.css" integrity="sha256-JorUgRM/sx5QluPIJwDZCdQ7HjAMudm9TnVViykLYy4=">
 </head>
 <body>
   <div id="auth-panel" class="auth-wrapper active">
@@ -279,6 +279,7 @@
               <p id="share-drop-text">Click or drag a file here (or share just a message)</p>
               <input type="file" id="share-file" class="hidden">
             </div>
+            <p id="share-size-warning" class="field-warning hidden">⚠️ Large file: it is encrypted whole in your browser's memory, which needs several times its size in RAM. It can be slow or fail on devices with little memory, and the recipient's browser needs the same to open it.</p>
           </div>
           <div class="form-group">
             <label for="share-pw">Unlock Password</label>
@@ -286,7 +287,7 @@
             <div id="share-pw-strength" class="pw-strength hidden">
               <div class="pw-strength-bar"><div id="share-pw-fill" class="pw-strength-fill"></div></div>
             </div>
-            <p id="share-pw-warning" class="pw-warning hidden">⚠️ Weak password: anyone with the link can try to guess it offline, without limits. Fine for content that is not sensitive.</p>
+            <p id="share-pw-warning" class="field-warning hidden">⚠️ Weak password: anyone with the link can try to guess it offline, without limits. Fine for content that is not sensitive.</p>
           </div>
           <div class="form-group">
             <label for="share-note">Message</label>
@@ -336,6 +337,6 @@
 
   <script src="crypto.js" integrity="sha256-tQVzu+RzG9qkIDvXAqpoTAY+53itZyw/0AZrE3tQnF4="></script>
   <script src="integrity.js" integrity="sha256-wsi9EK5GkbVp/lZzzmAS6PIxRWu+2l1wM7GKiT26aBQ="></script>
-  <script src="app.js" integrity="sha256-9h4gRBaHDCKCHlk6H+Zb1C3ww6QlNZm9GOFRCeh40CA="></script>
+  <script src="app.js" integrity="sha256-u0K99TjEeTFVnYOrCW+y/CG1uvuW9Yg6jBA/m7nvHZI="></script>
 </body>
 </html>
