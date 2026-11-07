@@ -23,9 +23,9 @@ test('security headers are set', async () => {
     assert.equal(res.headers.get('access-control-allow-origin'), null);
 });
 
-test('integrity endpoint lists the 10 frontend files', async () => {
+test('integrity endpoint lists the 11 frontend files', async () => {
     const { files } = await (await fetch(`${server.base}/api/integrity`)).json();
-    assert.equal(Object.keys(files).length, 10);
+    assert.equal(Object.keys(files).length, 11);
     for (const hash of Object.values(files)) assert.match(hash, /^[0-9a-f]{64}$/);
 });
 

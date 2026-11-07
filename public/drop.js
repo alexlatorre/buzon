@@ -16,6 +16,7 @@ const fileListUI = document.getElementById('file-list');
 
 const dropPanel = document.getElementById('drop-panel');
 const successPanel = document.getElementById('success-panel');
+const sendProgress = Progress.bar(document.getElementById('send-progress'));
 
 let targetPublicKey = null;
 // Sent with the package, so the server refuses it if the recipient rotated their keys since
@@ -144,11 +145,17 @@ btnSubmit.addEventListener('click', async () => {
         }
 
         // 1. Encrypt everything locally (format 2: every piece bound to its role, raw file bytes)
-        showMsg(selectedFiles.length > 0 ? `Encrypting message and ${selectedFiles.length} file(s) locally...` : 'Encrypting message...', 'info');
+        showMsg('', 'info');
         const files = [];
-        for (const file of selectedFiles) {
+        for (let i = 0; i < selectedFiles.length; i++) {
+            const file = selectedFiles[i];
+            sendProgress.busy(`Reading file ${i + 1} of ${selectedFiles.length}...`);
             files.push({ name: file.name, data: await file.arrayBuffer() });
         }
+        const totalBytes = files.reduce((acc, f) => acc + f.data.byteLength, 0);
+        sendProgress.busy(files.length > 0
+            ? `Encrypting the message and ${files.length} file(s) (${Progress.formatBytes(totalBytes)}) in your browser...`
+            : 'Encrypting the message...');
         const pkg = await CryptoUtils.encryptDropPackage(targetPublicKey, message, files, senderNameInput);
         // The message carries the file list and the sender name too: say so here, not with a 400
         if (CryptoUtils.base64ToBuffer(pkg.encryptedMessage).byteLength > CryptoUtils.DROP_V2.MAX_MESSAGE_BYTES + 16) {
@@ -167,13 +174,15 @@ btnSubmit.addEventListener('click', async () => {
         formData.append('keyFingerprint', targetKeyFingerprint);
 
         // 3. Transmit to Server
-        showMsg('Transmitting secure payload to the server...', 'info');
-        const res = await fetch(`/api/drop/${targetUserId}`, {
-            method: 'POST',
-            body: formData
-        });
+        // Progress.upload reports the bytes sent, which fetch cannot. Once every byte is sent the server
+        // still stores the files before it answers
+        const res = await Progress.upload(`/api/drop/${targetUserId}`, { method: 'POST', body: formData },
+            (done, total) => (total && done >= total
+                ? sendProgress.busy('Saving on the server...')
+                : sendProgress.bytes('Sending', done, total)));
 
         const data = await res.json();
+        sendProgress.hide();
         if (res.ok) {
             dropPanel.classList.remove('active');
             dropPanel.classList.add('hidden');
@@ -185,6 +194,7 @@ btnSubmit.addEventListener('click', async () => {
 
     } catch (error) {
         console.error(error);
+        sendProgress.hide();
         showMsg('Transmission failed: ' + error.message, 'error');
         btnSubmit.disabled = false;
     }

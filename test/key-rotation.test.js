@@ -11,7 +11,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { startServer, client, b64 } = require('./helpers');
 const { loadCryptoUtils } = require('./browser-crypto');
-const { loadAppPage, fakeElement } = require('./app-page');
+const { loadAppPage, fakeElement, fakeXMLHttpRequest, pageLibraries } = require('./app-page');
 
 const CryptoUtils = loadCryptoUtils();
 const subtle = globalThis.crypto.subtle;
@@ -484,7 +484,7 @@ async function dropPage(url) {
     };
     const code = read('drop.js').replace('// Initialize\nfetchPublicKey();', 'const __ready = fetchPublicKey();');
     assert.ok(code.includes('const __ready'), 'drop.js no longer ends with fetchPublicKey()');
-    const page = new Function('window', 'document', 'fetch', `${read('crypto.js')}\n${code}\nreturn { ready: __ready };`)(window, document, fetch);
+    const page = new Function('window', 'document', 'fetch', 'XMLHttpRequest', `${pageLibraries()}\n${code}\nreturn { ready: __ready };`)(window, document, fetch, fakeXMLHttpRequest(fetch));
     await page.ready;
     const el = id => document.getElementById(id);
     return {

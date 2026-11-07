@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shadow Drop | Secured Receiver</title>
-  <link rel="stylesheet" href="style.css" integrity="sha256-JorUgRM/sx5QluPIJwDZCdQ7HjAMudm9TnVViykLYy4=">
+  <link rel="stylesheet" href="style.css" integrity="sha256-GJoCdrFjcuEuMTcTxezPhebOWPFj7TJQb2kR1DhUrW0=">
 </head>
 <body>
   <div id="auth-panel" class="auth-wrapper active">
@@ -138,6 +138,10 @@
         <div class="attachments-box">
           <h4>Attachments</h4>
           <ul id="modal-files"></ul>
+          <div id="package-progress" class="progress hidden">
+            <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Progress"><div class="progress-fill"></div></div>
+            <div class="progress-label"></div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -314,6 +318,10 @@
               </select>
             </div>
           </div>
+          <div id="share-progress" class="progress hidden">
+            <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Progress"><div class="progress-fill"></div></div>
+            <div class="progress-label"></div>
+          </div>
           <div id="share-upload-msg" class="msg"></div>
         </div>
         <!-- Step 2: Result -->
@@ -336,7 +344,8 @@
   </div>
 
   <script src="crypto.js" integrity="sha256-tQVzu+RzG9qkIDvXAqpoTAY+53itZyw/0AZrE3tQnF4="></script>
-  <script src="integrity.js" integrity="sha256-wsi9EK5GkbVp/lZzzmAS6PIxRWu+2l1wM7GKiT26aBQ="></script>
-  <script src="app.js" integrity="sha256-u0K99TjEeTFVnYOrCW+y/CG1uvuW9Yg6jBA/m7nvHZI="></script>
+  <script src="integrity.js" integrity="sha256-9yW2kkSocxKYitNlOn+PcL38u0QL5bYJcVCCD16YdVE="></script>
+  <script src="progress.js" integrity="sha256-VOSNIwAgn2bSR9Hq8Ae8c1sj7O5i8mkla3PuC7XrMIQ="></script>
+  <script src="app.js" integrity="sha256-0yr9sAuhGsdRCUYbyKBKeE6glgLbLE1L3/mSXQvVH3g="></script>
 </body>
 </html>

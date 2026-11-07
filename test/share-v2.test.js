@@ -8,7 +8,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { startServer, client } = require('./helpers');
 const { loadCryptoUtils } = require('./browser-crypto');
-const { loadAppPage, fakeElement } = require('./app-page');
+const { loadAppPage, fakeElement, pageLibraries } = require('./app-page');
 
 const CryptoUtils = loadCryptoUtils();
 const subtle = globalThis.crypto.subtle;
@@ -60,7 +60,7 @@ async function sharePage(token) {
     const URL_ = { createObjectURL: blob => (saved.push(blob), 'blob:1'), revokeObjectURL() {} };
     const window = { crypto: globalThis.crypto, btoa, atob, location: { search: `?token=${token}`, hash: '' } };
     const fetch = (url, options) => globalThis.fetch(server.base + url, options);
-    new Function('window', 'document', 'fetch', 'URL', `${read('crypto.js')}\n${read('share.js')}`)(window, document, fetch, URL_);
+    new Function('window', 'document', 'fetch', 'URL', `${pageLibraries()}\n${read('share.js')}`)(window, document, fetch, URL_);
     for (let i = 0; i < 50 && !elements['share-filename']?.textContent && !elements['share-error-msg']?.textContent; i++) await settle();
     const el = id => document.getElementById(id);
     return {
@@ -143,6 +143,20 @@ test('nothing readable about the file reaches the server or the page before the 
     const page = await sharePage(token);
     assert.equal(page.el('share-filename').textContent.includes('informe'), false);
     assert.match(page.el('share-limits').innerHTML, /3 downloads remaining/);
+});
+
+test('sharing and opening a file show their progress and hide it when done', async () => {
+    owner.uploads.length = 0;
+    const token = await uploadShare('progreso.bin', 'x'.repeat(5000));
+    assert.deepEqual(owner.uploads, [[50, 100], [100, 100]], 'the upload went through Progress.upload');
+    assert.equal(owner.el('share-progress').classList.contains('hidden'), true);
+    assert.equal(owner.el('btn-share-upload').textContent, '⏳ Sharing...');
+
+    const page = await sharePage(token);
+    const opened = await page.unlock(PASSWORD);
+    assert.equal(opened.name, 'progreso.bin');
+    assert.equal(page.el('share-progress').classList.contains('hidden'), true);
+    assert.equal(page.el('share-msg').className.includes('error'), false, page.el('share-msg').textContent);
 });
 
 test('the right password shows and saves the real name, with a neutral type', async () => {

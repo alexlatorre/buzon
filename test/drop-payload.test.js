@@ -114,7 +114,8 @@ test('app.js saves downloads only under the decrypted name, with a neutral type'
     const app = read('app.js');
     assert.match(app, /CryptoUtils\.openDropPackage\(currentUser\.privateKey, pkg\)/);
     const download = app.slice(app.indexOf('async function downloadFile('), app.indexOf('function showPackageWarning('));
-    assert.match(download, /CryptoUtils\.decryptDropBody\(currentPackageSessionKey, await res\.arrayBuffer\(\), selectedPackage\.format, f\.fileId\)/);
+    assert.match(download, /const body = await Progress\.readBody\(res, /);
+    assert.match(download, /CryptoUtils\.decryptDropBody\(currentPackageSessionKey, body, selectedPackage\.format, f\.fileId\)/);
     assert.deepEqual(download.match(/\.download\s*=.*$/gm), ['.download = f.displayName;']);
     assert.deepEqual(download.match(/new Blob\(.*$/gm), ["new Blob([decryptedBuffer], { type: 'application/octet-stream' });"]);
     assert.doesNotMatch(download, /filename|mimeType|original_name|mime_type/);

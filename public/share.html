@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shadow Drop | Secure Download</title>
-  <link rel="stylesheet" href="style.css" integrity="sha256-JorUgRM/sx5QluPIJwDZCdQ7HjAMudm9TnVViykLYy4=">
+  <link rel="stylesheet" href="style.css" integrity="sha256-GJoCdrFjcuEuMTcTxezPhebOWPFj7TJQb2kR1DhUrW0=">
 </head>
 <body>
   <div class="auth-wrapper active">
@@ -45,6 +45,10 @@
         </div>
 
         <button id="btn-share-download" class="btn primary full-width">🔓 Decrypt & Open</button>
+        <div id="share-progress" class="progress hidden">
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Progress"><div class="progress-fill"></div></div>
+          <div class="progress-label"></div>
+        </div>
         <div id="share-msg" class="msg"></div>
       </div>
 
@@ -68,6 +72,7 @@
   </div>
 
   <script src="crypto.js" integrity="sha256-tQVzu+RzG9qkIDvXAqpoTAY+53itZyw/0AZrE3tQnF4="></script>
-  <script src="share.js" integrity="sha256-SA/2JIAPlfciYL45a7B+5eUvwZPU6TI1UiaTIxXfyi4="></script>
+  <script src="progress.js" integrity="sha256-VOSNIwAgn2bSR9Hq8Ae8c1sj7O5i8mkla3PuC7XrMIQ="></script>
+  <script src="share.js" integrity="sha256-zfmIEyk2m0w5h3hA6EjiG7IUAlbzPmA3jtzqx4jrlaw="></script>
 </body>
 </html>

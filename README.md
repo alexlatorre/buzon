@@ -109,7 +109,7 @@ The server never sees passwords, master keys, private keys, session keys, messag
 - **Packages sealed as a whole** (drop format 2): the server cannot swap file bodies, names or messages between slots or packages, drop or duplicate a file, or change the sender name without the inbox showing a warning; a package relabelled to the old format does not open.
 - **Recipient key fingerprint in drop links**: links end in `#k=<fingerprint>`, computed by the recipient's browser from its private key. The fragment never reaches the server, and the send page refuses to encrypt to a public key that does not match it. Older links without it still work, with a warning.
 - **Subresource Integrity**: every script and stylesheet tag carries the SHA-256 of its file, so the browser refuses to run a modified file served under an unmodified page (`npm run hashes` keeps the attributes current).
-- **File integrity check**: the 10 frontend files are hashed by the server and by the browser, compared with the hashes seen on the previous visit, and linked to GitHub for external comparison.
+- **File integrity check**: the 11 frontend files are hashed by the server and by the browser, compared with the hashes seen on the previous visit, and linked to GitHub for external comparison.
 - **Boss key** (double ESC): instant logout and memory wipe.
 
 ---
@@ -290,7 +290,7 @@ GitHub Actions runs the whole suite, MySQL included (against MariaDB 11.4), on N
 | `GET` | `/api/share/:token/download` | – | Download the encrypted share (counts towards the limit). |
 | `GET` | `/api/shares/:userId` | ✔ | List your shares. |
 | `DELETE` | `/api/share/:token` | ✔ | Delete a share you own. |
-| `GET` | `/api/integrity` | – | SHA-256 of the 10 frontend files. |
+| `GET` | `/api/integrity` | – | SHA-256 of the 11 frontend files. |
 
 ---
 
@@ -324,6 +324,7 @@ GitHub Actions runs the whole suite, MySQL included (against MariaDB 11.4), on N
 - `public/` – Frontend (vanilla JS, HTML, CSS):
   - `app.js` – Login, inbox, packages, one-time links, sharing.
   - `crypto.js` – PBKDF2, RSA-OAEP, AES-GCM helpers.
+  - `progress.js` – Progress bar for reading, encrypting, uploading, downloading and decrypting.
   - `drop.js` / `drop.html` – Sender page.
   - `share.js` / `share.html` – Share download page.
   - `integrity.js` – Client-side integrity check.
@@ -341,16 +342,17 @@ The repository forces LF line endings (`.gitattributes`), so these hashes are th
 <!-- hashes:start -->
 | File | SHA-256 |
 |---|---|
-| `app.js` | `bb42bdf538c47931559d83ab096fb2fc21b5bafb96f5883a8c103f9bb9ef1d92` |
+| `app.js` | `d32afdb00ba11ac75109461bc8a04a784ea09602db2c4d4bdff9925d0bd51f78` |
 | `crypto.js` | `b50573bbe4731bdaa4203bd702aa684c063ee778ad672c3fd0066b137b509c5e` |
-| `integrity.js` | `c2c8bd10ae4691b569fe5673ce6012e8f231456bbeda5d7033b18a893dba6814` |
-| `share.js` | `480ff624800f95f72260be396bb07ee5e52fc193d4e932355226932315dfca2e` |
-| `drop.js` | `73de54def55149b7fe57b50da92a2515000d320be5663b992706cba508180291` |
-| `style.css` | `268ad481133fb31e5096e3c82700d909d43b1e300cb9d9bd4e75558b290b632e` |
-| `index.html` | `dbaf98e1587a9ac12cc9bc8b1d7c0a0e9d5cfa13d611c74768e7399ac3fabf7c` |
-| `about.html` | `744d21d1e0c0d439c8fd2fa8f935525d32469e5fdcea070a2e47914a85a4d55c` |
-| `drop.html` | `69fe40eb3794a3848575f7a8e28621273f6cea9eb97466d7973792839eb977f2` |
-| `share.html` | `67e72dbce2e998542eb7898a49c895c5b493ebd583e8490e7fb7d904bbaf28b2` |
+| `progress.js` | `54e48d2300209f66d247d1eaf007bc735b23ecee62f269256b73ee0bb5eb3084` |
+| `integrity.js` | `f725b69244a87312988ad3653a7f8f70bdfcbb440be5b6097150820f5e987551` |
+| `share.js` | `cdf9881329369b4c39877840e848e21bb2140256f33e60378edceac788eb95ac` |
+| `drop.js` | `227d3353897a945111960e7d31da4df34d232dfcb4e6ddeb43cf57a77559cb28` |
+| `style.css` | `189a0276b16372e12e313713c5eccf85e6ce58f163ed32506f6911d43854ad6d` |
+| `index.html` | `338a6fb65b0d94c853331047244753044324aa5effdedba1c401378ca00f37b2` |
+| `about.html` | `73f0b313c53e21b73abe4dfd675688f5f95604e7c8128a902b3eb8737ac043df` |
+| `drop.html` | `65fbf89ad96ebef687b84e43e5ea1c70c7aa3d351623bcab9a9441de932fc1bc` |
+| `share.html` | `e587293adfc2a21141410b04fe260beed7b134e8daa82690a6a394436124532d` |
 <!-- hashes:end -->
 
 Manual check from the browser console (F12):
@@ -390,7 +392,7 @@ Shadow Drop es una plataforma para recibir ficheros y mensajes con arquitectura 
 - **Subidas protegidas**: enlace y cuota se comprueban antes de escribir en disco; máximo 20 ficheros de 50 MB por envío y 1 de `SHARE_MAX_FILE_MB` (200 MB por defecto) por share; a partir de 50 MB el panel y la página del enlace avisan de que el navegador necesitará mucha memoria.
 - **Límites sin condiciones de carrera** en enlaces de un solo uso y en descargas.
 - **Cuota** de 500 MB por usuario para envíos y shares juntos.
-- **Verificación de integridad** de los 10 ficheros del frontend.
+- **Verificación de integridad** de los 11 ficheros del frontend.
 - **Boss key** (doble ESC): cierra la sesión y borra la memoria al instante.
 
 ## Límites conocidos

@@ -23,6 +23,7 @@
     const textEl = document.getElementById('share-text');
     const btnCopyText = document.getElementById('btn-copy-share-text');
     const sizeWarningEl = document.getElementById('share-size-warning');
+    const progress = Progress.bar(document.getElementById('share-progress'));
 
     // The file is decrypted whole in memory: past this size the page warns before the password
     const LARGE_SHARE_BYTES = 50 * 1024 * 1024;
@@ -153,7 +154,8 @@
         if (!shareMeta) return;
 
         btnDownload.disabled = true;
-        btnDownload.textContent = '🔐 Deriving key...';
+        btnDownload.textContent = '⏳ Working...';
+        progress.busy('Deriving the key from the password...');
         showMsg('', 'info');
 
         try {
@@ -161,11 +163,11 @@
             const derivedKey = await deriveKey(password, shareMeta.salt);
 
             // 2. Decrypt the AES file key
-            btnDownload.textContent = '🔑 Decrypting key...';
             let fileKeyRaw;
             try {
                 fileKeyRaw = await decryptAES(derivedKey, shareMeta.encryptedFileKey, shareMeta.keyIv);
             } catch (e) {
+                progress.hide();
                 btnDownload.disabled = false;
                 btnDownload.textContent = '🔓 Decrypt & Open';
                 return showMsg('Wrong password.', 'error');
@@ -177,7 +179,7 @@
             );
 
             // 4. Download the encrypted file
-            btnDownload.textContent = '📥 Downloading encrypted file...';
+            progress.busy('Requesting the encrypted file...');
             const fileRes = await fetch(`/api/share/${TOKEN}/download`, {
                 headers: { 'X-Download-Proof': await CryptoUtils.shareDownloadProof(fileKeyRaw) }
             });
@@ -185,10 +187,11 @@
                 const errData = await fileRes.json().catch(() => ({}));
                 throw new Error(errData.error || 'Error downloading file');
             }
-            const encryptedBlob = await fileRes.arrayBuffer();
+            // The stored size stands in when the response gives no length
+            const encryptedBlob = await Progress.readBody(fileRes, (done, total) => progress.bytes('Downloading', done, total), Number(shareMeta.size) || 0);
 
             // 5. Decrypt the file
-            btnDownload.textContent = '🔓 Decrypting file...';
+            progress.busy(`Decrypting ${Progress.formatBytes(encryptedBlob.byteLength)} in your browser...`);
             const fileIv = base64ToBuffer(shareMeta.fileIv);
             const decryptedBuffer = await window.crypto.subtle.decrypt(
                 { name: 'AES-GCM', iv: fileIv },
@@ -237,11 +240,13 @@
             }
 
             // Show success
+            progress.hide();
             formEl.classList.add('hidden');
             successEl.classList.remove('hidden');
 
         } catch (error) {
             console.error('Download error:', error);
+            progress.hide();
             showMsg(error.message || 'Error decrypting the file.', 'error');
             btnDownload.disabled = false;
             btnDownload.textContent = '🔓 Decrypt & Open';

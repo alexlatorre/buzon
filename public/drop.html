@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shadow Drop | Secure Submission</title>
-  <link rel="stylesheet" href="style.css" integrity="sha256-JorUgRM/sx5QluPIJwDZCdQ7HjAMudm9TnVViykLYy4=">
+  <link rel="stylesheet" href="style.css" integrity="sha256-GJoCdrFjcuEuMTcTxezPhebOWPFj7TJQb2kR1DhUrW0=">
   <style>
     /* Specific overrides for drop page */
     .file-drop-area {
@@ -68,6 +68,10 @@
       <div class="btn-group">
         <button id="btn-submit" class="btn primary" disabled>Encrypt & Send</button>
       </div>
+      <div id="send-progress" class="progress hidden">
+        <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Progress"><div class="progress-fill"></div></div>
+        <div class="progress-label"></div>
+      </div>
       <div id="status-msg" class="msg"></div>
     </main>
 
@@ -81,6 +85,7 @@
   </div>
 
   <script src="crypto.js" integrity="sha256-tQVzu+RzG9qkIDvXAqpoTAY+53itZyw/0AZrE3tQnF4="></script>
-  <script src="drop.js" integrity="sha256-c95U3vVRSbf+V7UNqSolFQANMgvlZjuZJwbLpQgYApE="></script>
+  <script src="progress.js" integrity="sha256-VOSNIwAgn2bSR9Hq8Ae8c1sj7O5i8mkla3PuC7XrMIQ="></script>
+  <script src="drop.js" integrity="sha256-In0zU4l6lFERlg59MdpN800jLfy05t3rQ89Xp3VZyyg="></script>
 </body>
 </html>

@@ -51,6 +51,7 @@ const modal = document.getElementById('package-modal');
 const btnCloseModal = document.getElementById('btn-close-modal');
 const btnDownloadAll = document.getElementById('btn-download-all');
 const btnDestroy = document.getElementById('btn-destroy');
+const packageProgress = Progress.bar(document.getElementById('package-progress'));
 
 function showMsg(msg, type = 'info') {
     authMsg.textContent = msg;
@@ -271,10 +272,10 @@ async function handleLogin() {
 // login screen and say why, instead of leaving a dashboard where nothing works. A long operation passes
 // the account it started for, so a logout and a new login meanwhile never lend it the new session
 async function authFetch(url, options = {}, user = currentUser) {
-    const res = await fetch(url, {
-        ...options,
-        headers: { ...(options.headers || {}), 'Authorization': `Bearer ${user.sessionToken}` }
-    });
+    const { onUploadProgress, ...rest } = options;
+    const request = { ...rest, headers: { ...(rest.headers || {}), 'Authorization': `Bearer ${user.sessionToken}` } };
+    // fetch cannot report the bytes sent: an upload that shows progress goes through Progress.upload
+    const res = await (onUploadProgress ? Progress.upload(url, request, onUploadProgress) : fetch(url, request));
     if (res.status === 401 && user === currentUser && currentUser.sessionToken) {
         secureLogout();
         showMsg('Session expired. Please log in again.', 'error');
@@ -497,6 +498,7 @@ async function openPackage(id) {
 
 function closeModal() {
     modal.classList.add('hidden');
+    packageProgress.hide();
     selectedPackage = null;
     currentPackageSessionKey = null;
 }
@@ -559,16 +561,20 @@ async function updateQuotaDisplay() {
     }
 }
 
-async function downloadFile(f) {
+// step: "File 2 of 3 · " when downloading them all, shown before the file's own progress
+async function downloadFile(f, step = '') {
     if (!selectedPackage || !currentPackageSessionKey) return;
 
     try {
+        packageProgress.busy(`${step}Requesting ${f.displayName}...`);
         const res = await authFetch(`/api/package/${selectedPackage.id}/file/${f.id}`, {
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` }
         });
         if (!res.ok) throw new Error('Download failed');
 
-        const decryptedBuffer = await CryptoUtils.decryptDropBody(currentPackageSessionKey, await res.arrayBuffer(), selectedPackage.format, f.fileId);
+        const body = await Progress.readBody(res, (done, total) => packageProgress.bytes(`${step}Downloading ${f.displayName}:`, done, total));
+        packageProgress.busy(`${step}Decrypting ${f.displayName} in your browser...`);
+        const decryptedBuffer = await CryptoUtils.decryptDropBody(currentPackageSessionKey, body, selectedPackage.format, f.fileId);
 
         // Save under the decrypted name shown in the inbox, never under a name or type taken from the
         // stored payload, and with a neutral type so the browser never renders the file itself
@@ -586,6 +592,8 @@ async function downloadFile(f) {
         console.error(e);
         if (currentUser.sessionToken) alert(`Failed to decrypt file: ${f.displayName}`);
         return false;
+    } finally {
+        packageProgress.hide();
     }
 }
 
@@ -602,8 +610,9 @@ async function downloadFiles() {
     btnDownloadAll.textContent = 'Decrypting...';
     // Download each file, decrypt it and trigger download in browser
     let failed = 0;
-    for (let i = 0; i < selectedPackage.files.length; i++) {
-        if (!(await downloadFile(selectedPackage.files[i]))) failed++;
+    const count = selectedPackage.files.length;
+    for (let i = 0; i < count; i++) {
+        if (!(await downloadFile(selectedPackage.files[i], count > 1 ? `File ${i + 1} of ${count} · ` : ''))) failed++;
     }
 
     btnDownloadAll.textContent = 'Decrypt & Download All';
@@ -1639,6 +1648,7 @@ const shareDropArea = document.getElementById('share-drop-area');
 const shareDropText = document.getElementById('share-drop-text');
 const shareFileInput = document.getElementById('share-file');
 const shareSizeWarning = document.getElementById('share-size-warning');
+const shareProgress = Progress.bar(document.getElementById('share-progress'));
 
 // A share is encrypted whole in this browser's memory (and decrypted whole in the recipient's), so past
 // this size it is marked as heavy. The server's limit (SHARE_MAX_FILE_MB) comes from /api/config.
@@ -1670,6 +1680,7 @@ function openShareModal() {
     sharePwStrength.classList.add('hidden');
     sharePwWarning.classList.add('hidden');
     shareSizeWarning.classList.add('hidden');
+    shareProgress.hide();
     btnShareUpload.disabled = false;
     btnShareUpload.textContent = '🔐 Encrypt & Share';
     if (shareDropText) shareDropText.textContent = 'Click or drag a file here (or share just a message)';
@@ -1779,11 +1790,12 @@ async function handleShareUpload() {
     sharesUploading++;
     try {
         // 1. Read file (or the message as written, for a text-only share)
-        btnShareUpload.textContent = '📖 Reading file...';
+        btnShareUpload.textContent = '⏳ Sharing...';
+        shareProgress.busy(textOnly ? 'Preparing the message...' : 'Reading the file...');
         const fileBuffer = textOnly ? CryptoUtils.encodeShareText(rawNote) : await file.arrayBuffer();
 
         // 2. Generate AES key and encrypt file
-        btnShareUpload.textContent = '🔒 Encrypting file...';
+        shareProgress.busy(`Encrypting ${Progress.formatBytes(fileBuffer.byteLength)} in your browser...`);
         const aesKey = await CryptoUtils.generateSessionKey();
         const fileIv = window.crypto.getRandomValues(new Uint8Array(12));
         const encryptedFile = await window.crypto.subtle.encrypt(
@@ -1793,7 +1805,7 @@ async function handleShareUpload() {
         );
 
         // 3. Derive key from password
-        btnShareUpload.textContent = '🔑 Deriving key...';
+        shareProgress.busy('Deriving the key from the password...');
         const salt = CryptoUtils.generateSalt(16);
         const saltBuffer = CryptoUtils.base64ToBuffer(salt);
         const derivedKey = await CryptoUtils.deriveMasterKey(password, saltBuffer, false);
@@ -1818,7 +1830,6 @@ async function handleShareUpload() {
         }
 
         // 6. Build FormData and upload
-        btnShareUpload.textContent = '📤 Uploading...';
         const encryptedBlob = new Blob([encryptedFile], { type: 'application/octet-stream' });
         const formData = new FormData();
         formData.append('file', encryptedBlob, 'encrypted.bin');
@@ -1844,13 +1855,18 @@ async function handleShareUpload() {
         const res = await authFetch(`/api/share/${currentUser.id}`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${currentUser.sessionToken}` },
-            body: formData
+            body: formData,
+            // Once every byte is sent the server still stores the file before it answers
+            onUploadProgress: (done, total) => (total && done >= total
+                ? shareProgress.busy('Saving on the server...')
+                : shareProgress.bytes('Uploading', done, total))
         });
         const data = await res.json();
 
         if (!res.ok) throw new Error(data.error || 'Upload failed');
 
         // 7. Show result
+        shareProgress.hide();
         const shareUrl = `${window.location.origin}/share.html?token=${data.token}`;
         shareResultLink.value = shareUrl;
         shareStepForm.classList.add('hidden');
@@ -1863,6 +1879,7 @@ async function handleShareUpload() {
         console.error('Share upload error:', error);
         shareUploadMsg.textContent = error.message || 'Error encrypting/uploading the file.';
         shareUploadMsg.className = 'msg error';
+        shareProgress.hide();
         btnShareUpload.disabled = false;
         btnShareUpload.textContent = '🔐 Encrypt & Share';
     } finally {

@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { loadCryptoUtils } = require('./browser-crypto');
+const { pageLibraries } = require('./app-page');
 
 const CryptoUtils = loadCryptoUtils();
 const subtle = globalThis.crypto.subtle;
@@ -44,7 +45,7 @@ async function openDropPage(url, publicKey) {
     const fetch = async () => { fetched++; return new Response(JSON.stringify({ publicKey }), { status: 200 }); };
     const drop = read('drop.js').replace('// Initialize\nfetchPublicKey();', 'const __ready = fetchPublicKey();');
     assert.ok(drop.includes('const __ready'), 'drop.js no longer ends with fetchPublicKey()');
-    const page = new Function('window', 'document', 'fetch', `${read('crypto.js')}\n${drop}\nreturn { ready: __ready, key: () => targetPublicKey };`)(window, document, fetch);
+    const page = new Function('window', 'document', 'fetch', `${pageLibraries()}\n${drop}\nreturn { ready: __ready, key: () => targetPublicKey };`)(window, document, fetch);
     await page.ready;
     return {
         sendEnabled: !document.getElementById('btn-submit').disabled,

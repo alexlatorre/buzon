@@ -28,6 +28,31 @@ function fakeElement(tagName = 'div') {
     return el;
 }
 
+// XMLHttpRequest for Progress.upload, sending through the page's fetch. It reports half and then all of
+// the upload before the request goes out, and keeps each report in `progress` for the tests to check
+function fakeXMLHttpRequest(fetch, progress = []) {
+    return class {
+        constructor() { this.upload = {}; this.headers = {}; }
+        open(method, url) { this.method = method; this.url = url; }
+        setRequestHeader(name, value) { this.headers[name] = value; }
+        send(body) {
+            for (const loaded of [50, 100]) {
+                progress.push([loaded, 100]);
+                if (this.upload.onprogress) this.upload.onprogress({ loaded, total: 100, lengthComputable: true });
+            }
+            fetch(this.url, { method: this.method, headers: this.headers, body }).then(async res => {
+                this.status = res.status;
+                this.statusText = res.statusText;
+                this.response = await res.blob();
+                this.onload();
+            }, () => this.onerror());
+        }
+    };
+}
+
+// The scripts the pages load before their own: crypto.js and progress.js
+const pageLibraries = () => `${read('crypto.js')}\n${read('progress.js')}`;
+
 // fetch(url, options) answers the page's requests; storage stands in for localStorage
 // hash: the address fragment the page is opened with (e.g. an activation link)
 function loadAppPage({ fetch, confirm = () => true, storage = new Map(), hidden = [], hash = '' } = {}) {
@@ -54,14 +79,15 @@ function loadAppPage({ fetch, confirm = () => true, storage = new Map(), hidden 
     const saved = [];
     const URL_ = { createObjectURL: blob => { saved.push(blob); return `blob:${saved.length}`; }, revokeObjectURL() {} };
     const alerts = [];
-    const code = `${read('crypto.js')}\n${read('app.js')}\nreturn {
+    const uploads = [];
+    const code = `${pageLibraries()}\n${read('app.js')}\nreturn {
         openPackage, downloadFile, handleLogin, handleRegister, handleShareUpload, fetchShares, handleChangePassword, handleRotateKeys, replaceOneTimeLinks, logout: secureLogout, openAdminModal, handleAdminInvite,
         get user() { return currentUser; }, set user(v) { currentUser = v; },
         set packages(v) { currentPackages = v; }
     };`;
-    const page = new Function('window', 'document', 'fetch', 'localStorage', 'confirm', 'alert', 'URL', 'navigator', code)(
-        window, document, fetch, localStorage, confirm, msg => alerts.push(msg), URL_, { clipboard: { writeText: async () => {} } });
-    return { page, window, document, el: document.getElementById, saved, alerts, storage };
+    const page = new Function('window', 'document', 'fetch', 'localStorage', 'confirm', 'alert', 'URL', 'navigator', 'XMLHttpRequest', code)(
+        window, document, fetch, localStorage, confirm, msg => alerts.push(msg), URL_, { clipboard: { writeText: async () => {} } }, fakeXMLHttpRequest(fetch, uploads));
+    return { page, window, document, el: document.getElementById, saved, alerts, storage, uploads };
 }
 
-module.exports = { loadAppPage, fakeElement };
+module.exports = { loadAppPage, fakeElement, fakeXMLHttpRequest, pageLibraries };

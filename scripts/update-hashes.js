@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const FILES = ['app.js', 'crypto.js', 'integrity.js', 'share.js', 'drop.js', 'style.css', 'index.html', 'about.html', 'drop.html', 'share.html'];
+const FILES = ['app.js', 'crypto.js', 'progress.js', 'integrity.js', 'share.js', 'drop.js', 'style.css', 'index.html', 'about.html', 'drop.html', 'share.html'];
 const root = path.join(__dirname, '..');
 const publicDir = path.join(root, 'public');
 const readmePath = path.join(root, 'README.md');

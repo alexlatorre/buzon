@@ -214,7 +214,7 @@ function isValidUUID(str) {
 // SHA-256 of every critical public file, as served. Recomputed when a file changes on disk, so
 // updating public/ without a restart does not make every browser report a MITM.
 // The same list lives in public/integrity.js and scripts/update-hashes.js (a test keeps them equal).
-const INTEGRITY_FILES = ['app.js', 'crypto.js', 'drop.js', 'integrity.js', 'share.js', 'index.html', 'about.html', 'drop.html', 'share.html', 'style.css'];
+const INTEGRITY_FILES = ['app.js', 'crypto.js', 'progress.js', 'drop.js', 'integrity.js', 'share.js', 'index.html', 'about.html', 'drop.html', 'share.html', 'style.css'];
 const hashCache = new Map(); // file -> { mtimeMs, size, hash }
 
 function currentFileHashes() {
