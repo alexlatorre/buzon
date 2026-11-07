@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0 — 2026-11-07
+
+- **Progress bars.** Sharing a file, sending to a drop link, opening a shared link and downloading from the inbox show a bar under each step: the bytes, percentage, speed and time left while uploading or downloading, and a moving bar with the step's name while the browser reads, encrypts or decrypts (WebCrypto does that in one call that reports nothing). The new `public/progress.js` is one more checked frontend file (11). Downloads are read into a single buffer of the response's size, so a large file is not held twice.
+
 ## 2.4.0 — 2026-11-06
 
 - **Larger shares, configurable.** A share accepts one file of up to `SHARE_MAX_FILE_MB` (200 MB by default, was a fixed 100 MB). `GET /api/config` also returns `shareMaxFileBytes`, so the dashboard refuses a larger file before encrypting it. Past 50 MB the dashboard and the link page warn that the browser holds the whole file in memory.
